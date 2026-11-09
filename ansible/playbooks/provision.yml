@@ -6,6 +6,9 @@
   vars_files:
     - ../vars/defaults.yml
   tasks:
+    - name: Validate topology before contacting AWS
+      ansible.builtin.import_tasks: ../tasks/topology.yml
+
     - name: Validate AWS inputs
       ansible.builtin.assert:
         that:

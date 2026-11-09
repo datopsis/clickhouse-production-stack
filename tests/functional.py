@@ -70,6 +70,7 @@ def main():
                 assert info['Config']['User'] == '101:0'
                 assert info['HostConfig']['ReadonlyRootfs']
                 status = run('podman', 'exec', name, 'cat', '/proc/1/status', capture_output=True).stdout
+                assert 'Uid:\t101\t101\t101\t101' in status
                 assert 'CapEff:\t0000000000000000' in status
                 assert 'NoNewPrivs:\t1' in status
             # Plaintext, missing certificate, unknown CA and wrong passwords must fail.

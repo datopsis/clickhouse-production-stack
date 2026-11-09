@@ -3,6 +3,7 @@ import hashlib
 import json
 from pathlib import Path
 import tempfile
+import subprocess
 import unittest
 import xml.etree.ElementTree as ET
 
@@ -42,6 +43,8 @@ class Contract(unittest.TestCase):
             for direction in ['client', 'server']:
                 self.assertEqual(xml.findtext(f'openSSL/{direction}/verificationMode'), 'strict')
                 self.assertEqual(xml.findtext(f'openSSL/{direction}/invalidCertificateHandler/name'), 'RejectCertificateHandler')
+            self.assertEqual(xml.findtext('openSSL/client/extendedVerification'), 'true')
+            self.assertIsNone(xml.find('openSSL/server/extendedVerification'))
             for port in ['tcp_port', 'http_port', 'interserver_http_port', 'keeper_server/tcp_port']:
                 self.assertIsNone(xml.find(port))
             if node['role'] == 'keeper':
@@ -60,6 +63,18 @@ class Contract(unittest.TestCase):
             self.assertIsNone(xml.find(f'users/{user}/password'))
             self.assertEqual(len(xml.findtext(f'users/{user}/password_sha256_hex')), 64)
         self.assertEqual(xml.findtext('profiles/reader/readonly'), '1')
+
+    def test_input_guards(self):
+        base = self.variables | yaml.safe_load((ROOT / 'tests/provision-vars.yml').read_text())
+        variants = [({}, True), ({'stack_image': 'ghcr.io/datopsis/clickhouse-ubi:latest'}, False),
+                    ({'stack_image': None}, False), ({'stack_shards': 2}, False),
+                    ({'stack_secrets': {}}, False)]
+        for override, accepted in variants:
+            args = self.path / 'validation.json'
+            args.write_text(json.dumps(base | override))
+            result = subprocess.run(['ansible-playbook', 'tests/validate.yml', '--check', '-e', '@' + str(args)],
+                                    cwd=ROOT, capture_output=True, text=True)
+            self.assertEqual(result.returncode == 0, accepted, 'Input guard returned an unexpected outcome')
 
     def test_rolling_and_no_aws_credentials_in_workflow(self):
         deploy = yaml.safe_load((ROOT / 'ansible/playbooks/deploy.yml').read_text())

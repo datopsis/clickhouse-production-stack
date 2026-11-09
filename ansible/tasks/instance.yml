@@ -18,7 +18,12 @@
          stack_existing.instances[0].instance_type == stack_instance_type and
          stack_existing.instances[0].private_ip_address == stack_node_ips[node.name] and
          stack_existing.instances[0].subnet_id == stack_subnets[node.az] and
-         stack_existing.instances[0].state.name == 'running')
+         stack_existing.instances[0].state.name == 'running' and
+         stack_existing.instances[0].public_ip_address is not defined and
+         stack_existing.instances[0].metadata_options.http_tokens == 'required' and
+         stack_existing.instances[0].metadata_options.http_put_response_hop_limit == 1 and
+         stack_existing.instances[0].security_groups | map(attribute='group_id') | list ==
+         [stack_keeper_sg if node.role == 'keeper' else stack_clickhouse_sg])
     fail_msg: Existing VM differs or is stopped. Investigate explicitly; provisioning does not replace or restart stateful hosts.
 
 - name: Create new private instance

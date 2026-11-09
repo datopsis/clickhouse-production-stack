@@ -22,6 +22,11 @@ inter-server fetches: `interserver_http_host` advertises its stable peer name.
 | Keepers | Keepers | 9444 Raft, 9281 quorum verification | mTLS |
 | Hosts | Operator endpoints/proxy/mirrors | 443 | AWS/API/registry/repository TLS |
 
+Server mTLS validates the client certificate chain; it does not require a
+client source IP in its certificate. Outbound clients validate the named server.
+SQL identities and Keeper ACLs provide application authorization in addition
+to transport trust.
+
 No port 22, public IP, default egress rule or plaintext service port is created.
 Security groups are stateful, so response traffic does not require reverse
 rules. AWS VPC resolver/time services have AWS-specific SG semantics; network

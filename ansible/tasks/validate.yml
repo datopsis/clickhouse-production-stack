@@ -1,28 +1,13 @@
 ---
-- name: Validate the immutable image and supported topology
+- name: Validate topology and image
+  ansible.builtin.import_tasks: topology.yml
+
+- name: Require an immutable image without a mutable tag
   ansible.builtin.assert:
     that:
-      - stack_name is match('^[a-z][a-z0-9-]{0,30}$')
       - stack_image is string
       - stack_image is match('^[a-z0-9.-]+(?::[0-9]+)?/[a-z0-9/._-]+@sha256:[0-9a-f]{64}$')
-      - stack_shards | int == 1
-      - stack_nodes | selectattr('role', 'equalto', 'keeper') | list | length == 3
-      - stack_nodes | selectattr('role', 'equalto', 'clickhouse') | list | length >= 2
-      - stack_nodes | map(attribute='name') | unique | length == stack_nodes | length
-      - stack_nodes | selectattr('role', 'equalto', 'keeper') | map(attribute='id') | unique | length == 3
-      - stack_nodes | selectattr('role', 'equalto', 'keeper') | map(attribute='az') | unique | length == 3
-      - stack_nodes | selectattr('role', 'equalto', 'clickhouse') | map(attribute='az') | unique | length >= 2
-    fail_msg: Supply an immutable image digest and one shard with at least two replicas and exactly three Keepers across AZs.
-
-- name: Validate each node
-  ansible.builtin.assert:
-    that:
-      - item.name is match('^[a-z][a-z0-9-]{0,30}$')
-      - item.role in ['keeper', 'clickhouse']
-      - item.id | int > 0
-      - item.az in stack_subnets
-      - stack_node_ips[item.name] is string
-  loop: '{{ stack_nodes }}'
+    fail_msg: Supply the real digest of the reviewed image. Tags and missing images are refused.
 
 - name: Validate deployment secret presence without disclosing values
   ansible.builtin.assert:

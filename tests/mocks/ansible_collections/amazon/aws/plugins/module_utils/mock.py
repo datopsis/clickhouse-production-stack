@@ -1,4 +1,5 @@
 """Offline AWS contract doubles. Fail closed outside check mode; no SDK/network."""
+import os
 from ansible.module_utils.basic import AnsibleModule
 
 
@@ -21,18 +22,29 @@ def run(kind):
                                                      vpc_id='vpc-0123456789abcdef0', map_public_ip_on_launch=False)
                                                 for i, s in enumerate(p['subnet_ids'])])
     if kind == 'ec2_instance_info':
+        if os.environ.get('STACK_MOCK_EXISTING'):
+            node = p['filters']['tag:Name'].removeprefix('clickhouse-')
+            zone = int(node[-1])
+            role = node.startswith('keeper')
+            module.exit_json(changed=False, instances=[dict(
+                instance_id='i-0123456789abcdef0', image_id='ami-0123456789abcdef0', instance_type='m7i.large',
+                private_ip_address=f'10.0.{zone}.{10 if role else 11}', subnet_id=f'subnet-{zone:017d}',
+                state={'name': 'running'}, metadata_options={'http_tokens': 'required', 'http_put_response_hop_limit': 1},
+                security_groups=[{'group_id': 'sg-00000000000000001' if role else 'sg-00000000000000002'}])])
         module.exit_json(changed=False, instances=[])
     if kind == 'ec2_security_group':
         for rule in p['rules'] + p['rules_egress']:
             assert rule['proto'] == 'tcp'
             assert set(rule['ports']) <= {443, 8443, 9440, 9010, 9281, 9444}
             assert rule.get('cidr_ip') != '0.0.0.0/0'
-        module.exit_json(changed=True, group_id='sg-0123456789abcdef0')
+        module.exit_json(changed=True, group_id='sg-00000000000000001' if p['name'].endswith('-keeper') else 'sg-00000000000000002')
+    assert not os.environ.get('STACK_MOCK_EXISTING'), 'Rerun must not recreate an existing VM'
     assert p['metadata_options']['http_tokens'] == 'required'
     assert p['metadata_options']['http_put_response_hop_limit'] == 1
     assert p['termination_protection']
     assert len(p['network_interfaces']) == 1
     assert p['network_interfaces'][0]['assign_public_ip'] is False
+    assert p['network_interfaces'][0]['groups'] == ['sg-00000000000000001' if p['tags']['Role'] == 'keeper' else 'sg-00000000000000002']
     assert p['volumes'][0]['ebs']['encrypted'] is True
     assert p['volumes'][0]['ebs']['delete_on_termination'] is False
     assert p['volumes'][0]['ebs']['kms_key_id']

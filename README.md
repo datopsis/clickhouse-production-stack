@@ -152,8 +152,7 @@ reattach an old volume.
 ```sh
 bash scripts/check.sh
 bash scripts/install-gitleaks.sh .local/bin
-.local/bin/gitleaks git --redact --no-banner .
-.local/bin/gitleaks dir --redact --no-banner .
+bash scripts/scan-secrets.sh .local/bin/gitleaks
 ```
 
 Tools and Compose dependencies have `.in` inputs and hash-locked `.txt`
