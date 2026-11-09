@@ -10,7 +10,7 @@ services:
     security_opt: ['no-new-privileges:true']
     tmpfs: ['/tmp:size=256m,mode=1777']
     restart: unless-stopped
-    stop_grace_period: 60s
+    stop_grace_period: 300s
     mem_limit: {{ '1g' if node.role == 'keeper' else '2g' }}
     pids_limit: 512
     ulimits:
@@ -29,6 +29,11 @@ services:
       {{ peer.name }}: '{{ stack_node_ips[peer.name] }}'
 {% endfor %}
 {% endif %}
+{% if stack_compose_subnet is defined %}
+    networks:
+      default:
+        ipv4_address: '{{ stack_node_ips[node.name] }}'
+{% endif %}
 {% if node.role == 'keeper' %}
     healthcheck:
       disable: true
@@ -41,3 +46,10 @@ services:
       start_period: 30s
 {% endif %}
 {% endfor %}
+{% if stack_compose_subnet is defined %}
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: '{{ stack_compose_subnet }}'
+{% endif %}

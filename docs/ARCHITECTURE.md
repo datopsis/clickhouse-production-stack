@@ -11,7 +11,9 @@ Each node has a separate private VM. The default Keeper placements are AZs
 a/b/c; the two replicas are in a/b, comprising one shard. Names and IDs are
 stable variables, not generated ordinal identities. `/etc/hosts` entries in
 each container resolve peer names to operator-reserved private IPs. Certificate
-SANs use those names. The container's bridge address is never advertised for
+SANs include those names and reserved private IPs. The ClickHouse Keeper client
+validates its resolved IP, so the IP SAN is required while extended verification
+stays enabled. CI uses a private Compose subnet with fixed IPs for the same contract. The container's bridge address is never advertised for
 inter-server fetches: `interserver_http_host` advertises its stable peer name.
 
 | Source | Destination | TCP ports | Protection |
@@ -75,6 +77,11 @@ made here. Registry and package access must work through allowed HTTPS paths;
 no public networking is added as a fallback.
 
 ## Lifecycle and limitations
+
+Compose allows 300 seconds for graceful shutdown and systemd allows 360; this
+exceeds ClickHouse's 120-second connection-drain default and leaves time for
+coordination/storage cleanup. The failure test deliberately uses a shorter
+stop timeout to simulate loss of a replica.
 
 Normal reruns verify health before editing each node, then recreate only that
 node on template/secret/image changes and verify it before advancing. Bootstrap

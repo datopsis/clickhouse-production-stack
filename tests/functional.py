@@ -59,6 +59,7 @@ def main():
                       'ca': str(path / 'ca.crt'), 'cert': str(path / 'replica1.crt'), 'key': str(path / 'replica1.key'),
                       'admin_password': variables['stack_secrets']['admin_password'],
                       'reader_password': variables['stack_secrets']['reader_password']}
+            assert config['addresses'] == variables['stack_node_ips']
             cluster = Cluster(config)
             retry(cluster.quorum)
             print('PASS: three-node Keeper quorum over mTLS', flush=True)
@@ -77,7 +78,8 @@ def main():
             # Plaintext, missing certificate, unknown CA and wrong passwords must fail.
             for port in [8123, 9000, 9009]:
                 must_fail(lambda: socket.create_connection((config['addresses']['replica1'], port), timeout=3))
-            must_fail(lambda: socket.create_connection((config['addresses']['keeper1'], 9181), timeout=3))
+            for port in [2181, 9181]:
+                must_fail(lambda: socket.create_connection((config['addresses']['keeper1'], port), timeout=3))
             must_fail(lambda: cluster.query('replica1', 'SELECT 1', password=''))
             must_fail(lambda: cluster.query('replica1', 'CREATE TABLE default.denied (x UInt8) ENGINE=Memory', reader=True))
             original = cluster.context

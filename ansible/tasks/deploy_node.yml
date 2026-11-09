@@ -150,6 +150,20 @@
   changed_when: false
   when: not ansible_check_mode
 
+- name: Validate the private IP identity used by the Keeper client
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - verify
+      - -x509_strict
+      - -CAfile
+      - '{{ stack_root }}/{{ node.name }}/config/ca.crt'
+      - -verify_ip
+      - '{{ stack_node_ips[node.name] }}'
+      - '{{ stack_root }}/{{ node.name }}/config/tls.crt'
+  changed_when: false
+  when: not ansible_check_mode
+
 - name: Pull the required immutable image
   ansible.builtin.command:
     argv: [podman, pull, '{{ stack_image }}']

@@ -10,7 +10,7 @@ WorkingDirectory={{ stack_root }}
 ExecStart={{ stack_root }}/venv/bin/podman-compose -f {{ stack_root }}/compose.yml up -d
 ExecStop={{ stack_root }}/venv/bin/podman-compose -f {{ stack_root }}/compose.yml stop
 TimeoutStartSec=300
-TimeoutStopSec=120
+TimeoutStopSec=360
 
 [Install]
 WantedBy=multi-user.target

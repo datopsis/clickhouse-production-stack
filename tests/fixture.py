@@ -24,19 +24,22 @@ def fixture(path, image):
     secret['keeper_identity'] = 'stack:' + secrets.token_hex(32)
     secret['ca_cert'] = (path / 'ca.crt').read_text()
     secret['nodes'] = {}
+    addresses = {node['name']: f'172.30.243.{10 + i}' for i, node in enumerate(defaults['stack_nodes'])}
     for node in defaults['stack_nodes']:
         name = node['name']
         openssl('req', '-newkey', 'rsa:2048', '-nodes', '-subj', f'/CN={name}',
                 '-keyout', path / f'{name}.key', '-out', path / f'{name}.csr')
         ext = path / f'{name}.ext'
-        ext.write_text(f'subjectAltName=DNS:{name}\nextendedKeyUsage=serverAuth,clientAuth\n')
+        ext.write_text(f'subjectAltName=DNS:{name},IP:{addresses[name]}\nextendedKeyUsage=serverAuth,clientAuth\n')
         openssl('x509', '-req', '-in', path / f'{name}.csr', '-CA', path / 'ca.crt', '-CAkey', path / 'ca.key',
                 '-CAcreateserial', '-days', '1', '-extfile', ext, '-out', path / f'{name}.crt')
         openssl('verify', '-x509_strict', '-purpose', 'sslserver', '-verify_hostname', name,
                 '-CAfile', path / 'ca.crt', path / f'{name}.crt')
         openssl('verify', '-x509_strict', '-purpose', 'sslclient', '-CAfile', path / 'ca.crt', path / f'{name}.crt')
+        openssl('verify', '-x509_strict', '-verify_ip', addresses[name], '-CAfile', path / 'ca.crt', path / f'{name}.crt')
         secret['nodes'][name] = {'cert': (path / f'{name}.crt').read_text(), 'key': (path / f'{name}.key').read_text()}
-    variables = defaults | {'stack_root': str(path), 'stack_image': image, 'stack_secrets': secret}
+    variables = defaults | {'stack_root': str(path), 'stack_image': image, 'stack_secrets': secret,
+                            'stack_node_ips': addresses, 'stack_compose_subnet': '172.30.243.0/24'}
     variable_file = path / 'vars.json'
     variable_file.write_text(json.dumps(variables))
     os.chmod(variable_file, 0o600)

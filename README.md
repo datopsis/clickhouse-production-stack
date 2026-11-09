@@ -70,9 +70,10 @@ schema below describes fields, not usable credentials:
   at least 32 characters. ClickHouse uses it for Keeper znode ACLs.
 - `ca_cert`: PEM trust bundle for a dedicated cluster CA.
 - `nodes`: mapping of every node name to `cert` (PEM chain) and `key` (PEM private
-  key). Each certificate needs its node name in SAN and both `serverAuth` and
+  key). Each certificate needs its node name **and reserved private IP** in SAN and both `serverAuth` and
   `clientAuth` usage. Client certificates from the dedicated CA are also
-  required for SQL access. Do not distribute the CA private key to hosts.
+  required for SQL access. ClickHouse resolves Keeper names to IPs before TLS
+  verification, so DNS-only node certificates are insufficient. Do not distribute the CA private key to hosts.
 
 There are no default passwords. Client accounts are `stack_admin` and
 `stack_reader`; the latter enforces `readonly=1`. The default ClickHouse user
