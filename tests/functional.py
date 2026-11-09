@@ -95,7 +95,9 @@ def main():
                 cluster.query('replica1', f'INSERT INTO {table} VALUES (1)')
                 cluster.sync('replica2', table)
                 assert cluster.query('replica2', f'SELECT sum(value) FROM {table}', reader=True) == '1'
-                run('podman', 'stop', '-t', '30', 'clickhouse-replica1')
+                run('podman', 'kill', '--signal', 'KILL', 'clickhouse-replica1')
+                stopped = json.loads(run('podman', 'inspect', 'clickhouse-replica1', capture_output=True).stdout)[0]
+                assert not stopped['State']['Running']
                 assert cluster.query('replica2', f'SELECT sum(value) FROM {table}', reader=True) == '1'
                 cluster.query('replica2', f'INSERT INTO {table} VALUES (2)')
                 assert cluster.query('replica2', f'SELECT sum(value) FROM {table}', reader=True) == '3'
@@ -128,8 +130,16 @@ def main():
             raise
         finally:
             # Keep coordination available until database shutdown has completed.
-            run(*compose, 'stop', 'replica1', 'replica2')
-            run(*compose, 'down', '--volumes')
+            try:
+                run(*compose, 'stop', 'replica1', 'replica2')
+                for name in ['replica1', 'replica2']:
+                    state = json.loads(run('podman', 'inspect', 'clickhouse-' + name, capture_output=True).stdout)[0]['State']
+                    if state['ExitCode'] != 0:
+                        run('podman', 'logs', '--tail', '100', 'clickhouse-' + name)
+                    assert state['ExitCode'] == 0, f'{name}: normal shutdown must exit cleanly, got {state["ExitCode"]}'
+                print('PASS: normal database shutdown exits cleanly without SIGKILL', flush=True)
+            finally:
+                run(*compose, 'down', '--volumes')
 
 
 if __name__ == '__main__':

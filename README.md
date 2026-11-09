@@ -32,7 +32,8 @@ its support contract. No alternative Keeper image is substituted.
 Every service runs as `101:0`, with a read-only root, all capabilities dropped,
 `no-new-privileges`, a bounded `/tmp` tmpfs, and explicit durable storage.
 Configuration and TLS keys are mounted read-only. The Podman engine/systemd
-unit are rootful; the container processes are non-root throughout.
+unit are rootful; the container processes are non-root throughout. The internal
+ClickHouse watchdog is disabled so Podman supervises the actual server process.
 
 ## Operator inputs
 
@@ -166,7 +167,8 @@ CI jobs: `lint` (ansible-lint, yamllint, zizmor, rendering/security contracts,
 mocked provisioning); `secrets` (gitleaks history and working tree); native
 `functional (amd64)` and `functional (arm64)` (Podman image build, actual
 five-node Compose topology, TLS/authentication refusal tests, replication,
-replica failover and recovery, Keeper failure and Compose idempotence).
+replica failover and recovery, Keeper failure, Compose idempotence and clean
+shutdown).
 A development CI result does not qualify the RHEL/SELinux host path. The
 GitHub Ubuntu 24.04 runner's distro Podman is a separate compatibility test;
 deployment requires Podman 5.3 or newer on the chosen RHEL 9 AMI.

@@ -80,8 +80,10 @@ no public networking is added as a fallback.
 
 Compose allows 300 seconds for graceful shutdown and systemd allows 360; this
 exceeds ClickHouse's 120-second connection-drain default and leaves time for
-coordination/storage cleanup. The failure test deliberately uses a shorter
-stop timeout to simulate loss of a replica.
+coordination/storage cleanup. The failure test deliberately kills one replica to simulate abrupt loss.
+The ClickHouse watchdog is disabled explicitly so the server is PID 1 and
+receives shutdown signals directly; Podman owns crash restart. CI requires
+exit code zero on normal database shutdown.
 
 Normal reruns verify health before editing each node, then recreate only that
 node on template/secret/image changes and verify it before advancing. Bootstrap

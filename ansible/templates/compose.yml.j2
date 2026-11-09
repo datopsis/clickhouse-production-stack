@@ -5,6 +5,8 @@ services:
     container_name: {{ (stack_name ~ '-' ~ node.name) | to_json }}
     hostname: {{ node.name }}
     user: '101:0'
+    environment:
+      CLICKHOUSE_WATCHDOG_ENABLE: '0'
     read_only: true
     cap_drop: [ALL]
     security_opt: ['no-new-privileges:true']
