@@ -8,6 +8,7 @@ def run(kind):
         'ec2_vpc_subnet_info': dict(region='str', subnet_ids='list'),
         'ec2_security_group': dict(region='str', name='str', description='str', vpc_id='str', rules='list',
                                   rules_egress='list', purge_rules='bool', purge_rules_egress='bool'),
+        'ec2_vpc_route_table_info': dict(region='str', filters='dict'),
         'ec2_instance_info': dict(region='str', filters='dict'),
         'ec2_instance': dict(region='str', name='str', image_id='str', instance_type='str', instance_role='str',
                              state='str', wait='bool', termination_protection='bool', instance_initiated_shutdown_behavior='str',
@@ -21,6 +22,11 @@ def run(kind):
         module.exit_json(changed=False, subnets=[dict(subnet_id=s, availability_zone=f'us-east-1{chr(97+i)}',
                                                      vpc_id='vpc-0123456789abcdef0', map_public_ip_on_launch=False)
                                                 for i, s in enumerate(p['subnet_ids'])])
+    if kind == 'ec2_vpc_route_table_info':
+        if os.environ.get('STACK_MOCK_MAIN_ROUTE') and 'association.subnet-id' in p['filters']:
+            module.exit_json(changed=False, route_tables=[])
+        gateway = 'igw-0123456789abcdef0' if os.environ.get('STACK_MOCK_PUBLIC_SUBNET') else 'local'
+        module.exit_json(changed=False, route_tables=[{'routes': [{'gateway_id': gateway}]}])
     if kind == 'ec2_instance_info':
         if os.environ.get('STACK_MOCK_EXISTING'):
             node = p['filters']['tag:Name'].removeprefix('clickhouse-')

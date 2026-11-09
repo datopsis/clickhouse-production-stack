@@ -43,7 +43,7 @@ required `null`. Defaults live in [defaults.yml](ansible/vars/defaults.yml).
 | --- | --- |
 | `stack_name` | Stable namespace for EC2 tags, security groups and containers. |
 | `stack_region`, `stack_vpc_id` | Existing operator-managed AWS region and VPC. |
-| `stack_subnets` | `a`, `b`, `c` to private subnet IDs in three different AZs. No public-IP-on-launch. |
+| `stack_subnets` | `a`, `b`, `c` to private subnet IDs in three different AZs. No public-IP-on-launch or direct internet-gateway route. |
 | `stack_nodes` | List of `{name, role, id, az}`; default five separate VMs. Exactly three Keepers; at least two replicas. Keep names/IDs/IPs stable. |
 | `stack_node_ips` | Node name to reserved private IPv4 address in its designated subnet. Names become certificate SANs and container peer aliases. |
 | `stack_shards` | Default and currently accepted value: `1`. |

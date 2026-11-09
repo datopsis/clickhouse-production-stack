@@ -34,7 +34,8 @@ class Cluster:
             body = response.read().decode()
             if response.status != 200:
                 # Never print server exception bodies: they may contain query/secret data.
-                raise RuntimeError(f'{name}: query rejected (HTTP {response.status})')
+                code = response.getheader('X-ClickHouse-Exception-Code', 'unknown')
+                raise RuntimeError(f'{name}: query rejected (HTTP {response.status}, ClickHouse code {code})')
             return body.strip()
         finally:
             connection.close()
@@ -55,7 +56,7 @@ class Cluster:
     def read_only(self):
         for name in self.replicas:
             assert self.query(name, 'SELECT 1', reader=True) == '1'
-            assert self.query(name, "SELECT count() FROM cluster('stack', system.one)", reader=True) == str(len(self.replicas))
+            assert self.query(name, "SELECT count() FROM clusterAllReplicas('stack', system.one)", reader=True) == str(len(self.replicas))
             unhealthy = self.query(name, 'SELECT count() FROM system.replicas WHERE is_readonly OR is_session_expired '
                                    'OR active_replicas < total_replicas OR queue_size > 0', reader=True)
             assert unhealthy == '0', f'{name}: replication is degraded or has pending work'

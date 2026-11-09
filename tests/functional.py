@@ -61,6 +61,7 @@ def main():
                       'reader_password': variables['stack_secrets']['reader_password']}
             cluster = Cluster(config)
             retry(cluster.quorum)
+            print('PASS: three-node Keeper quorum over mTLS', flush=True)
             retry(cluster.read_only)
             print('PASS: three-node Keeper quorum and authenticated distributed read-only queries', flush=True)
             # Confirm runtime hardening rather than just trusting the YAML.
@@ -124,6 +125,8 @@ def main():
             run(*compose, 'logs', '--tail', '80')
             raise
         finally:
+            # Keep coordination available until database shutdown has completed.
+            run(*compose, 'stop', 'replica1', 'replica2')
             run(*compose, 'down', '--volumes')
 
 

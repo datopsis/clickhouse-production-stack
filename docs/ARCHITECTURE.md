@@ -27,6 +27,10 @@ client source IP in its certificate. Outbound clients validate the named server.
 SQL identities and Keeper ACLs provide application authorization in addition
 to transport trust.
 
+Provisioning checks explicit subnet route tables, falling back to the VPC main
+table, and rejects direct internet-gateway routes. NAT/transit gateways and
+endpoint policy still require operator review.
+
 No port 22, public IP, default egress rule or plaintext service port is created.
 Security groups are stateful, so response traffic does not require reverse
 rules. AWS VPC resolver/time services have AWS-specific SG semantics; network

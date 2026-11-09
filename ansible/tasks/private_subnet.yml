@@ -1,0 +1,30 @@
+---
+- name: Find the subnet's explicit route table
+  amazon.aws.ec2_vpc_route_table_info:
+    region: '{{ stack_region }}'
+    filters:
+      vpc-id: '{{ stack_vpc_id }}'
+      association.subnet-id: '{{ subnet.subnet_id }}'
+  register: stack_explicit_routes
+
+- name: Find the VPC main route table when the subnet inherits it
+  amazon.aws.ec2_vpc_route_table_info:
+    region: '{{ stack_region }}'
+    filters:
+      vpc-id: '{{ stack_vpc_id }}'
+      association.main: 'true'
+  register: stack_main_routes
+  when: stack_explicit_routes.route_tables | length == 0
+
+- name: Select the effective route table
+  ansible.builtin.set_fact:
+    stack_effective_routes: '{{ stack_explicit_routes.route_tables + (stack_main_routes.route_tables | default([])) }}'
+
+- name: Reject public subnets with direct internet gateway routing
+  ansible.builtin.assert:
+    that:
+      - stack_effective_routes | length == 1
+      - >-
+        stack_effective_routes[0].routes | selectattr('gateway_id', 'defined') |
+        map(attribute='gateway_id') | select('match', '^igw-') | list | length == 0
+    fail_msg: Supplied subnet has ambiguous routing or a direct internet gateway route. Supply an existing private subnet.

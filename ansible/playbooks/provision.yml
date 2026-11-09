@@ -39,6 +39,12 @@
           - stack_subnet_info.subnets | map(attribute='vpc_id') | unique | list == [stack_vpc_id]
           - stack_subnet_info.subnets | selectattr('map_public_ip_on_launch') | list | length == 0
 
+    - name: Verify effective private subnet routing
+      ansible.builtin.include_tasks: ../tasks/private_subnet.yml
+      loop: '{{ stack_subnet_info.subnets }}'
+      loop_control:
+        loop_var: subnet
+
     - name: Create group identities without removing existing rules
       amazon.aws.ec2_security_group:
         region: '{{ stack_region }}'
