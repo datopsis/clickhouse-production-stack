@@ -1,0 +1,18 @@
+<clickhouse>
+  <profiles>
+    <default><max_threads>4</max_threads><max_memory_usage>1073741824</max_memory_usage></default>
+    <reader><readonly>1</readonly><max_threads>2</max_threads></reader>
+  </profiles>
+  <users>
+    <stack_admin>
+      <password_sha256_hex>{{ stack_secrets.admin_password | hash('sha256') }}</password_sha256_hex>
+      <networks><ip>::/0</ip></networks><profile>default</profile><quota>default</quota>
+      <access_management>1</access_management>
+    </stack_admin>
+    <stack_reader>
+      <password_sha256_hex>{{ stack_secrets.reader_password | hash('sha256') }}</password_sha256_hex>
+      <networks><ip>::/0</ip></networks><profile>reader</profile><quota>default</quota>
+    </stack_reader>
+  </users>
+  <quotas><default><interval><duration>3600</duration></interval></default></quotas>
+</clickhouse>

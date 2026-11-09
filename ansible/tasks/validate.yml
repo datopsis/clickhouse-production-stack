@@ -1,0 +1,39 @@
+---
+- name: Validate the immutable image and supported topology
+  ansible.builtin.assert:
+    that:
+      - stack_name is match('^[a-z][a-z0-9-]{0,30}$')
+      - stack_image is string
+      - stack_image is match('^[a-z0-9.-]+(?::[0-9]+)?/[a-z0-9/._-]+@sha256:[0-9a-f]{64}$')
+      - stack_shards | int == 1
+      - stack_nodes | selectattr('role', 'equalto', 'keeper') | list | length == 3
+      - stack_nodes | selectattr('role', 'equalto', 'clickhouse') | list | length >= 2
+      - stack_nodes | map(attribute='name') | unique | length == stack_nodes | length
+      - stack_nodes | selectattr('role', 'equalto', 'keeper') | map(attribute='id') | unique | length == 3
+      - stack_nodes | selectattr('role', 'equalto', 'keeper') | map(attribute='az') | unique | length == 3
+      - stack_nodes | selectattr('role', 'equalto', 'clickhouse') | map(attribute='az') | unique | length >= 2
+    fail_msg: Supply an immutable image digest and one shard with at least two replicas and exactly three Keepers across AZs.
+
+- name: Validate each node
+  ansible.builtin.assert:
+    that:
+      - item.name is match('^[a-z][a-z0-9-]{0,30}$')
+      - item.role in ['keeper', 'clickhouse']
+      - item.id | int > 0
+      - item.az in stack_subnets
+      - stack_node_ips[item.name] is string
+  loop: '{{ stack_nodes }}'
+
+- name: Validate deployment secret presence without disclosing values
+  ansible.builtin.assert:
+    that:
+      - stack_secrets.admin_password | length >= 32
+      - stack_secrets.reader_password | length >= 32
+      - stack_secrets.interserver_password | length >= 32
+      - stack_secrets.cluster_secret | length >= 32
+      - stack_secrets.keeper_identity is match('^[a-zA-Z0-9_-]+:.{32,}$')
+      - stack_secrets.ca_cert | length > 0
+      - stack_secrets.nodes[item.name].cert | length > 0
+      - stack_secrets.nodes[item.name].key | length > 0
+  loop: '{{ stack_nodes }}'
+  no_log: true

@@ -1,0 +1,12 @@
+---
+# Offline doubles only; these identifiers are not real account resources.
+stack_region: us-east-1
+stack_vpc_id: vpc-0123456789abcdef0
+stack_ami_id: ami-0123456789abcdef0
+stack_instance_profile: offline-test-profile
+stack_ebs_kms_key_id: offline-test-kms
+stack_ssm_bucket: offline-test-bucket
+stack_ssm_kms_key_id: offline-test-kms
+stack_subnets: {a: subnet-00000000000000001, b: subnet-00000000000000002, c: subnet-00000000000000003}
+stack_node_ips: {keeper1: 10.0.1.10, keeper2: 10.0.2.10, keeper3: 10.0.3.10, replica1: 10.0.1.11, replica2: 10.0.2.11}
+stack_https_egress_cidrs: [10.0.4.0/24]

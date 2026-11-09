@@ -1,0 +1,21 @@
+---
+- name: Render disposable CI topology from the deployment templates
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files: [../ansible/vars/defaults.yml]
+  tasks:
+    - name: Render each node configuration
+      ansible.builtin.include_tasks: render_node.yml
+      loop: '{{ stack_nodes }}'
+      loop_control:
+        loop_var: node
+
+    - name: Render all services as one runner Compose project
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../ansible/templates/compose.yml.j2"
+        dest: '{{ stack_root }}/compose.yml'
+        mode: '0600'
+      vars:
+        deployment_nodes: '{{ stack_nodes }}'
+        stack_publish_ports: false

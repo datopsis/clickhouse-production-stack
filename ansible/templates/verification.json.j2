@@ -1,0 +1,9 @@
+{
+  "nodes": {{ stack_nodes | to_json }},
+  "addresses": {{ stack_node_ips | to_json }},
+  "ca": {{ (stack_root ~ '/' ~ node.name ~ '/config/ca.crt') | to_json }},
+  "cert": {{ (stack_root ~ '/' ~ node.name ~ '/config/tls.crt') | to_json }},
+  "key": {{ (stack_root ~ '/' ~ node.name ~ '/config/tls.key') | to_json }},
+  "admin_password": {{ stack_secrets.admin_password | to_json }},
+  "reader_password": {{ stack_secrets.reader_password | to_json }}
+}

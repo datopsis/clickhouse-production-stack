@@ -1,0 +1,31 @@
+---
+- name: Create test node directories
+  ansible.builtin.file:
+    path: '{{ stack_root }}/{{ node.name }}/{{ item }}'
+    state: directory
+    mode: '0700'
+  loop: [config, data]
+
+- name: Render the production XML templates
+  ansible.builtin.template:
+    src: '{{ playbook_dir }}/../ansible/templates/{{ item.src }}'
+    dest: '{{ stack_root }}/{{ node.name }}/config/{{ item.dest }}'
+    mode: '0400'
+  loop:
+    - {src: '{{ node.role }}.xml.j2', dest: config.xml}
+    - {src: users.xml.j2, dest: users.xml}
+    - {src: client.xml.j2, dest: client.xml}
+  no_log: true
+  diff: false
+
+- name: Install ephemeral test TLS inputs
+  ansible.builtin.copy:
+    content: '{{ item.content }}'
+    dest: '{{ stack_root }}/{{ node.name }}/config/{{ item.name }}'
+    mode: '0400'
+  loop:
+    - {name: ca.crt, content: '{{ stack_secrets.ca_cert }}'}
+    - {name: tls.crt, content: '{{ stack_secrets.nodes[node.name].cert }}'}
+    - {name: tls.key, content: '{{ stack_secrets.nodes[node.name].key }}'}
+  no_log: true
+  diff: false

@@ -1,0 +1,198 @@
+---
+- name: Require the target host baseline
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.os_family == 'RedHat'
+      - ansible_facts.distribution_major_version | int == 9
+      - ansible_facts.architecture == 'x86_64'
+
+- name: Select this node
+  ansible.builtin.set_fact:
+    node: '{{ stack_nodes | selectattr("name", "equalto", inventory_hostname) | first }}'
+    deployment_nodes: '{{ stack_nodes | selectattr("name", "equalto", inventory_hostname) | list }}'
+
+- name: Inspect prior installation
+  ansible.builtin.stat:
+    path: '{{ stack_root }}/compose.yml'
+  register: stack_previous
+
+- name: Refuse bootstrap over an existing installation
+  ansible.builtin.assert:
+    that: not stack_bootstrap or not stack_previous.stat.exists
+    fail_msg: Bootstrap is only for new hosts. Use the default guarded rolling mode for reruns.
+
+- name: Require bootstrap for first installation
+  ansible.builtin.assert:
+    that: stack_bootstrap or stack_previous.stat.exists
+    fail_msg: First installation requires stack_bootstrap=true. Do not use bootstrap for replacements.
+
+- name: Verify current cluster before changing this node
+  ansible.builtin.command:
+    argv:
+      - python3.11
+      - '{{ stack_root }}/verify.py'
+      - '{{ stack_root }}/verification.json'
+      - '{{ "--keepers-only" if node.role == "keeper" else "--read-only" }}'
+  changed_when: false
+  when: not stack_bootstrap and not ansible_check_mode
+
+- name: Install host runtime packages
+  ansible.builtin.dnf:
+    name: [podman, python3.11, python3.11-pip, openssl, curl]
+    state: present
+
+- name: Read Podman version
+  ansible.builtin.command: podman --version
+  register: stack_podman_version
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Require Podman 5.3 or newer
+  ansible.builtin.assert:
+    that: stack_podman_version.stdout.split()[-1] is version('5.3', '>=')
+  when: not ansible_check_mode
+
+- name: Create stack and config directories
+  ansible.builtin.file:
+    path: '{{ item }}'
+    state: directory
+    owner: '101'
+    group: '0'
+    mode: '0700'
+  loop:
+    - '{{ stack_root }}'
+    - '{{ stack_root }}/{{ node.name }}'
+    - '{{ stack_root }}/{{ node.name }}/config'
+    - '{{ stack_root }}/{{ node.name }}/data'
+
+- name: Copy locked Compose provider requirements
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../.github/requirements/runtime.txt"
+    dest: '{{ stack_root }}/runtime.txt'
+    owner: root
+    group: root
+    mode: '0600'
+
+- name: Install the locked Compose provider into an isolated environment
+  ansible.builtin.pip:
+    requirements: '{{ stack_root }}/runtime.txt'
+    virtualenv: '{{ stack_root }}/venv'
+    virtualenv_command: python3.11 -m venv
+    extra_args: '--require-hashes --only-binary=:all:'
+
+- name: Render service configuration and client credentials
+  ansible.builtin.template:
+    src: '{{ playbook_dir | dirname }}/templates/{{ item.src }}'
+    dest: '{{ stack_root }}/{{ node.name }}/config/{{ item.dest }}'
+    owner: '101'
+    group: '0'
+    mode: '0400'
+  loop:
+    - {src: '{{ node.role }}.xml.j2', dest: config.xml}
+    - {src: users.xml.j2, dest: users.xml}
+    - {src: client.xml.j2, dest: client.xml}
+  register: stack_config
+  no_log: true
+  diff: false
+
+- name: Install operator supplied TLS material
+  ansible.builtin.copy:
+    content: '{{ item.content }}'
+    dest: '{{ stack_root }}/{{ node.name }}/config/{{ item.name }}'
+    owner: '101'
+    group: '0'
+    mode: '0400'
+  loop:
+    - {name: ca.crt, content: '{{ stack_secrets.ca_cert }}'}
+    - {name: tls.crt, content: '{{ stack_secrets.nodes[node.name].cert }}'}
+    - {name: tls.key, content: '{{ stack_secrets.nodes[node.name].key }}'}
+  register: stack_tls
+  no_log: true
+  diff: false
+
+- name: Render the Compose project
+  ansible.builtin.template:
+    src: "{{ playbook_dir | dirname }}/templates/compose.yml.j2"
+    dest: '{{ stack_root }}/compose.yml'
+    owner: root
+    group: root
+    mode: '0600'
+  register: stack_compose
+
+- name: Install verification utility
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../scripts/verify.py"
+    dest: '{{ stack_root }}/verify.py'
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Install private verification inputs
+  ansible.builtin.template:
+    src: "{{ playbook_dir | dirname }}/templates/verification.json.j2"
+    dest: '{{ stack_root }}/verification.json'
+    owner: root
+    group: root
+    mode: '0600'
+  no_log: true
+  diff: false
+
+- name: Validate local certificate chain and expiry before restarting
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - verify
+      - -CAfile
+      - '{{ stack_root }}/{{ node.name }}/config/ca.crt'
+      - -verify_hostname
+      - '{{ node.name }}'
+      - '{{ stack_root }}/{{ node.name }}/config/tls.crt'
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Pull the required immutable image
+  ansible.builtin.command:
+    argv: [podman, pull, '{{ stack_image }}']
+  register: stack_pull
+  changed_when: "'Copying blob' in stack_pull.stderr"
+  when: not ansible_check_mode
+
+- name: Install boot lifecycle unit
+  ansible.builtin.template:
+    src: "{{ playbook_dir | dirname }}/templates/stack.service.j2"
+    dest: /etc/systemd/system/clickhouse-stack.service
+    owner: root
+    group: root
+    mode: '0644'
+  register: stack_unit
+
+- name: Start and enable Compose at boot
+  ansible.builtin.systemd_service:
+    name: clickhouse-stack
+    enabled: true
+    state: started
+    daemon_reload: '{{ stack_unit.changed }}'
+  register: stack_started
+
+- name: Recreate only this node when configuration changed
+  ansible.builtin.command:
+    argv: ['{{ stack_root }}/venv/bin/podman-compose', '-f', '{{ stack_root }}/compose.yml', up, '-d', '--force-recreate']
+  changed_when: true
+  when:
+    - not ansible_check_mode
+    - not stack_started.changed
+    - stack_config.changed or stack_tls.changed or stack_compose.changed
+
+- name: Wait for this node to rejoin before advancing the rolling batch
+  ansible.builtin.command:
+    argv:
+      - python3.11
+      - '{{ stack_root }}/verify.py'
+      - '{{ stack_root }}/verification.json'
+      - '{{ "--keepers-only" if node.role == "keeper" else "--read-only" }}'
+  changed_when: false
+  register: stack_ready
+  until: stack_ready.rc == 0
+  retries: 30
+  delay: 5
+  when: not stack_bootstrap and not ansible_check_mode

@@ -1,0 +1,49 @@
+---
+- name: Validate deployment before any remote changes
+  hosts: localhost
+  gather_facts: false
+  vars_files: [../vars/defaults.yml]
+  tasks:
+    - name: Validate topology and secrets
+      ansible.builtin.import_tasks: ../tasks/validate.yml
+
+- name: Configure and roll Keepers one VM at a time
+  hosts: keeper
+  become: true
+  gather_facts: true
+  serial: 1
+  any_errors_fatal: true
+  vars_files: [../vars/defaults.yml]
+  tasks:
+    - name: Configure and deploy node
+      ansible.builtin.import_tasks: ../tasks/deploy_node.yml
+
+- name: Confirm quorum before starting ClickHouse
+  hosts: keeper[0]
+  become: true
+  gather_facts: false
+  vars_files: [../vars/defaults.yml]
+  tasks:
+    - name: Verify all Keepers participate in one quorum
+      ansible.builtin.command:
+        argv: [python3.11, '{{ stack_root }}/verify.py', '{{ stack_root }}/verification.json', '--keepers-only']
+      changed_when: false
+      register: stack_quorum
+      until: stack_quorum.rc == 0
+      retries: 30
+      delay: 5
+      when: not ansible_check_mode
+
+- name: Configure and roll ClickHouse one VM at a time
+  hosts: clickhouse
+  become: true
+  gather_facts: true
+  serial: 1
+  any_errors_fatal: true
+  vars_files: [../vars/defaults.yml]
+  tasks:
+    - name: Configure and deploy node
+      ansible.builtin.import_tasks: ../tasks/deploy_node.yml
+
+- name: Verify deployed topology
+  ansible.builtin.import_playbook: verify.yml

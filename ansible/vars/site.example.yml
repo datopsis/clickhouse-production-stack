@@ -1,0 +1,23 @@
+---
+# REQUIRED operator inputs; null is deliberately not deployable.
+stack_region: null
+stack_vpc_id: null
+# Map a/b/c to existing private subnet IDs in THREE different AZs.
+stack_subnets: {a: null, b: null, c: null}
+# Stable, unused private IPs in the corresponding subnets. Used for TLS routing.
+stack_node_ips: {keeper1: null, keeper2: null, keeper3: null, replica1: null, replica2: null}
+# RHEL 9, x86_64, SSM agent active, Python 3.11 installed. Pin an approved AMI.
+stack_ami_id: null
+stack_instance_profile: null
+stack_ebs_kms_key_id: null
+stack_ssm_bucket: null
+stack_ssm_kms_key_id: null
+# HTTPS egress to operator-managed endpoints/proxy/mirrors only. No 0.0.0.0/0.
+stack_https_egress_cidrs: []
+# Existing SG IDs allowed to use HTTPS/native TLS; empty denies external clients.
+stack_client_security_groups: []
+# Required: registry/repository@sha256:<64 hex characters>, no tag.
+stack_image: null
+# Set true ONLY for first creation; reruns default to guarded rolling mode.
+stack_bootstrap: false
+# Supply stack_secrets through --ask-vault-pass -e @vault.yml; see README.

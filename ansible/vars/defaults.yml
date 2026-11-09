@@ -1,0 +1,17 @@
+---
+stack_name: clickhouse
+stack_root: /srv/clickhouse-stack
+stack_shards: 1
+stack_bootstrap: false
+stack_instance_type: m7i.large
+stack_root_volume_gib: 100
+stack_nodes:
+  - {name: keeper1, role: keeper, id: 1, az: a}
+  - {name: keeper2, role: keeper, id: 2, az: b}
+  - {name: keeper3, role: keeper, id: 3, az: c}
+  - {name: replica1, role: clickhouse, id: 1, az: a}
+  - {name: replica2, role: clickhouse, id: 2, az: b}
+stack_client_security_groups: []
+stack_service_ports:
+  keeper: [9281, 9444]
+  clickhouse: [8443, 9440, 9010]

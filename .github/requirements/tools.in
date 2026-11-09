@@ -1,0 +1,7 @@
+ansible-core==2.22.0
+ansible-lint==26.11.0
+yamllint==1.38.0
+zizmor==1.32.0
+boto3==1.43.126
+filelock==4.2.9
+pip-tools==7.6.2

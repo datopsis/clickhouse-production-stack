@@ -1,0 +1,10 @@
+.venv/
+.ansible/
+__pycache__/
+*.pyc
+.env
+.env.*
+.local/
+*.pem
+*.key
+inventory.generated.yml

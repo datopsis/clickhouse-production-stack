@@ -1,0 +1,5 @@
+<config>
+  <host>{{ node.name }}</host><port>9440</port><secure>true</secure>
+  <user>stack_reader</user><password>{{ stack_secrets.reader_password | e }}</password>
+{% include 'tls.xml.j2' %}
+</config>
