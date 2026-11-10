@@ -1,0 +1,17 @@
+all:
+  vars:
+    ansible_connection: amazon.aws.aws_ssm
+    ansible_aws_ssm_region: {{ stack_region }}
+    ansible_aws_ssm_bucket_name: {{ stack_ssm_bucket }}
+    ansible_aws_ssm_bucket_sse_mode: aws:kms
+    ansible_aws_ssm_bucket_sse_kms_key_id: {{ stack_ssm_kms_key_id }}
+    ansible_python_interpreter: /usr/bin/python3.11
+  children:
+{% for role in ['keeper', 'clickhouse'] %}
+    {{ role }}:
+      hosts:
+{% for name in groups[role] %}
+        {{ name }}:
+          ansible_host: {{ hostvars[name].ansible_host }}
+{% endfor %}
+{% endfor %}

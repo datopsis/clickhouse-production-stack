@@ -1,0 +1,20 @@
+---
+- name: Verify cluster formation and read-only access
+  hosts: clickhouse[0]
+  become: true
+  gather_facts: false
+  vars_files: [../vars/defaults.yml]
+  tasks:
+    - name: Check quorum, remote queries and replication health
+      ansible.builtin.command:
+        argv:
+          - python3.11
+          - '{{ stack_root }}/verify.py'
+          - '{{ stack_root }}/verification.json'
+          - '{{ "--exercise-replication" if stack_verify_writes | default(false) else "--read-only" }}'
+      changed_when: stack_verify_writes | default(false)
+      register: stack_verification
+      until: stack_verification.rc == 0
+      retries: 12
+      delay: 5
+      when: not ansible_check_mode

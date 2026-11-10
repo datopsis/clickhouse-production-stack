@@ -1,0 +1,20 @@
+<clickhouse>
+  <logger><level>information</level><console>true</console></logger>
+  <listen_host>0.0.0.0</listen_host>
+  <path>/var/lib/clickhouse/</path>
+  <keeper_server>
+    <tcp_port_secure>9281</tcp_port_secure>
+    <server_id>{{ node.id }}</server_id>
+    <log_storage_path>/var/lib/clickhouse/coordination/log</log_storage_path>
+    <snapshot_storage_path>/var/lib/clickhouse/coordination/snapshots</snapshot_storage_path>
+    <four_letter_word_white_list>mntr,ruok</four_letter_word_white_list>
+    <coordination_settings><operation_timeout_ms>10000</operation_timeout_ms></coordination_settings>
+    <raft_configuration>
+      <secure>true</secure>
+{% for peer in stack_nodes if peer.role == 'keeper' %}
+      <server><id>{{ peer.id }}</id><hostname>{{ peer.name }}</hostname><port>9444</port></server>
+{% endfor %}
+    </raft_configuration>
+  </keeper_server>
+{% include 'tls.xml.j2' %}
+</clickhouse>

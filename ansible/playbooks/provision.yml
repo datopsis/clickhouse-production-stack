@@ -1,0 +1,122 @@
+---
+- name: Provision private EC2 hosts without configuring the AWS account
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - ../vars/defaults.yml
+  tasks:
+    - name: Validate topology before contacting AWS
+      ansible.builtin.import_tasks: ../tasks/topology.yml
+
+    - name: Validate AWS inputs
+      ansible.builtin.assert:
+        that:
+          - stack_region is string
+          - stack_vpc_id is match('^vpc-[0-9a-f]+$')
+          - stack_ami_id is match('^ami-[0-9a-f]+$')
+          - stack_instance_profile | length > 0
+          - stack_ebs_kms_key_id | length > 0
+          - stack_ssm_bucket | length > 0
+          - stack_ssm_kms_key_id | length > 0
+          - stack_https_egress_cidrs | length > 0
+          - "'0.0.0.0/0' not in stack_https_egress_cidrs"
+          - "'::/0' not in stack_https_egress_cidrs"
+          - stack_subnets.values() | unique | length == 3
+          - stack_node_ips.values() | unique | length == stack_nodes | length
+
+    - name: Inspect operator supplied subnets
+      amazon.aws.ec2_vpc_subnet_info:
+        region: '{{ stack_region }}'
+        subnet_ids: '{{ stack_subnets.values() | list }}'
+      register: stack_subnet_info
+
+    - name: Require private subnets in one VPC across three availability zones
+      ansible.builtin.assert:
+        that:
+          - stack_subnet_info.subnets | length == 3
+          - stack_subnet_info.subnets | map(attribute='availability_zone') | unique | length == 3
+          - stack_subnet_info.subnets | map(attribute='vpc_id') | unique | list == [stack_vpc_id]
+          - stack_subnet_info.subnets | selectattr('map_public_ip_on_launch') | list | length == 0
+
+    - name: Verify effective private subnet routing
+      ansible.builtin.include_tasks: ../tasks/private_subnet.yml
+      loop: '{{ stack_subnet_info.subnets }}'
+      loop_control:
+        loop_var: subnet
+
+    - name: Create group identities without removing existing rules
+      amazon.aws.ec2_security_group:
+        region: '{{ stack_region }}'
+        name: '{{ stack_name }}-{{ item }}'
+        description: '{{ stack_name }} {{ item }} TLS only'
+        vpc_id: '{{ stack_vpc_id }}'
+        rules: []
+        rules_egress: []
+        purge_rules: false
+        purge_rules_egress: false
+      loop: [keeper, clickhouse]
+      register: stack_groups
+
+    - name: Record group IDs
+      ansible.builtin.set_fact:
+        stack_keeper_sg: '{{ stack_groups.results[0].group_id | default("sg-check-keeper") }}'
+        stack_clickhouse_sg: '{{ stack_groups.results[1].group_id | default("sg-check-clickhouse") }}'
+        stack_client_rules: []
+        stack_https_rules: []
+
+    - name: Build client ingress rules
+      ansible.builtin.set_fact:
+        stack_client_rules: '{{ stack_client_rules + [{"proto": "tcp", "ports": [8443, 9440], "group_id": item}] }}'
+      loop: '{{ stack_client_security_groups }}'
+
+    - name: Build required HTTPS egress rules
+      ansible.builtin.set_fact:
+        stack_https_rules: '{{ stack_https_rules + [{"proto": "tcp", "ports": [443], "cidr_ip": item}] }}'
+      loop: '{{ stack_https_egress_cidrs }}'
+
+    - name: Reconcile Keeper network boundary
+      amazon.aws.ec2_security_group:
+        region: '{{ stack_region }}'
+        name: '{{ stack_name }}-keeper'
+        description: '{{ stack_name }} keeper TLS only'
+        vpc_id: '{{ stack_vpc_id }}'
+        rules:
+          - {proto: tcp, ports: [9444, 9281], group_id: '{{ stack_keeper_sg }}'}
+          - {proto: tcp, ports: [9281], group_id: '{{ stack_clickhouse_sg }}'}
+        rules_egress: >-
+          {{ stack_https_rules +
+             [{'proto': 'tcp', 'ports': [9444, 9281], 'group_id': stack_keeper_sg}] }}
+        purge_rules: true
+        purge_rules_egress: true
+      when: not ansible_check_mode or stack_groups.results[0].group_id is defined
+
+    - name: Reconcile ClickHouse network boundary
+      amazon.aws.ec2_security_group:
+        region: '{{ stack_region }}'
+        name: '{{ stack_name }}-clickhouse'
+        description: '{{ stack_name }} clickhouse TLS only'
+        vpc_id: '{{ stack_vpc_id }}'
+        rules: >-
+          {{ stack_client_rules +
+             [{'proto': 'tcp', 'ports': [8443, 9440, 9010], 'group_id': stack_clickhouse_sg}] }}
+        rules_egress: >-
+          {{ stack_https_rules +
+             [{'proto': 'tcp', 'ports': [9281], 'group_id': stack_keeper_sg},
+              {'proto': 'tcp', 'ports': [8443, 9440, 9010], 'group_id': stack_clickhouse_sg}] }}
+        purge_rules: true
+        purge_rules_egress: true
+      when: not ansible_check_mode or stack_groups.results[1].group_id is defined
+
+    - name: Provision each node without replacing existing storage
+      ansible.builtin.include_tasks: ../tasks/instance.yml
+      loop: '{{ stack_nodes }}'
+      loop_control:
+        loop_var: node
+
+    - name: Save SSM inventory for subsequent independent deployments
+      ansible.builtin.template:
+        src: "{{ playbook_dir | dirname }}/templates/inventory.yml.j2"
+        dest: '{{ playbook_dir }}/../../inventory.generated.yml'
+        mode: '0600'
+      when: not ansible_check_mode

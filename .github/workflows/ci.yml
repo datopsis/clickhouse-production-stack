@@ -1,0 +1,83 @@
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.13'
+      - name: Install hash locked tools
+        run: >-
+          python -m pip install --require-hashes --only-binary=:all: -r .github/requirements/tools.txt
+      - name: Install pinned Ansible collection
+        run: ansible-galaxy collection install -r ansible/requirements.yml
+      - name: Lint, render, test contracts and mock provisioning
+        run: bash scripts/check.sh
+  secrets:
+    name: secrets
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Install verified gitleaks binary
+        run: bash scripts/install-gitleaks.sh "$RUNNER_TEMP/gitleaks"
+      - name: Scan Git history and working tree
+        run: |
+          "$RUNNER_TEMP/gitleaks/gitleaks" git --redact --no-banner .
+          "$RUNNER_TEMP/gitleaks/gitleaks" dir --redact --no-banner .
+  functional:
+    name: functional (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {arch: amd64, runner: ubuntu-24.04}
+          - {arch: arm64, runner: ubuntu-24.04-arm}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check out the pinned image source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: datopsis/clickhouse-ubi
+          ref: 975d2818ec4f3f295fb5012aeb44cf83cc94a058
+          path: .local/image-source
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.13'
+      - name: Install Podman and locked test tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y podman
+          python -m venv .venv
+          .venv/bin/pip install --require-hashes --only-binary=:all: -r .github/requirements/tools.txt -r .github/requirements/runtime.txt
+      - name: Build image locally without publishing
+        run: |
+          sudo podman version
+          sudo podman build --format docker -f .local/image-source/Containerfile -t localhost/clickhouse-stack-ci:build .local/image-source
+          sudo podman image inspect localhost/clickhouse-stack-ci:build --format '{{.Id}}' > "$RUNNER_TEMP/image-id"
+      - name: Test TLS topology, replication and failover
+        run: |
+          sudo env PATH="$PWD/.venv/bin:$PATH" .venv/bin/python tests/functional.py "$(cat "$RUNNER_TEMP/image-id")"

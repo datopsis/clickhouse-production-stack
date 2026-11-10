@@ -1,0 +1,16 @@
+  <openSSL>
+{% for direction in ['server', 'client'] %}
+    <{{ direction }}>
+      <certificateFile>/etc/stack/tls.crt</certificateFile>
+      <privateKeyFile>/etc/stack/tls.key</privateKeyFile>
+      <caConfig>/etc/stack/ca.crt</caConfig>
+      <loadDefaultCAFile>false</loadDefaultCAFile>
+      <verificationMode>strict</verificationMode>
+{% if direction == 'client' %}
+      <extendedVerification>true</extendedVerification>
+{% endif %}
+      <disableProtocols>sslv2,sslv3,tlsv1,tlsv1_1</disableProtocols>
+      <invalidCertificateHandler><name>RejectCertificateHandler</name></invalidCertificateHandler>
+    </{{ direction }}>
+{% endfor %}
+  </openSSL>

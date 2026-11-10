@@ -1,0 +1,43 @@
+<clickhouse>
+  <logger><level>information</level><console>true</console></logger>
+  <listen_host>0.0.0.0</listen_host>
+  <https_port>8443</https_port>
+  <tcp_port_secure>9440</tcp_port_secure>
+  <interserver_https_port>9010</interserver_https_port>
+  <interserver_http_host>{{ node.name }}</interserver_http_host>
+  <interserver_http_credentials>
+    <user>replication</user><password>{{ stack_secrets.interserver_password | e }}</password>
+    <allow_empty>false</allow_empty>
+  </interserver_http_credentials>
+  <path>/var/lib/clickhouse/</path>
+  <tmp_path>/var/lib/clickhouse/tmp/</tmp_path>
+  <user_files_path>/var/lib/clickhouse/user_files/</user_files_path>
+  <format_schema_path>/var/lib/clickhouse/format_schemas/</format_schema_path>
+  <users_config>/etc/stack/users.xml</users_config>
+  <macros><shard>01</shard><replica>{{ node.name }}</replica></macros>
+  <max_connections>512</max_connections>
+  <max_thread_pool_size>256</max_thread_pool_size>
+  <background_pool_size>16</background_pool_size>
+  <background_schedule_pool_size>8</background_schedule_pool_size>
+  <background_fetches_pool_size>4</background_fetches_pool_size>
+  <background_move_pool_size>2</background_move_pool_size>
+  <background_common_pool_size>2</background_common_pool_size>
+  <mark_cache_size>134217728</mark_cache_size>
+  <remote_servers>
+    <stack>
+      <secret>{{ stack_secrets.cluster_secret | e }}</secret>
+      <shard><internal_replication>true</internal_replication>
+{% for peer in stack_nodes if peer.role == 'clickhouse' %}
+        <replica><host>{{ peer.name }}</host><port>9440</port><secure>1</secure></replica>
+{% endfor %}
+      </shard>
+    </stack>
+  </remote_servers>
+  <zookeeper>
+    <identity>{{ stack_secrets.keeper_identity | e }}</identity>
+{% for peer in stack_nodes if peer.role == 'keeper' %}
+    <node><host>{{ peer.name }}</host><port>9281</port><secure>1</secure></node>
+{% endfor %}
+  </zookeeper>
+{% include 'tls.xml.j2' %}
+</clickhouse>

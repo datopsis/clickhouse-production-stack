@@ -1,0 +1,57 @@
+services:
+{% for node in deployment_nodes %}
+  {{ node.name }}:
+    image: {{ stack_image | to_json }}
+    container_name: {{ (stack_name ~ '-' ~ node.name) | to_json }}
+    hostname: {{ node.name }}
+    user: '101:0'
+    environment:
+      CLICKHOUSE_WATCHDOG_ENABLE: '0'
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    tmpfs: ['/tmp:size=256m,mode=1777']
+    restart: unless-stopped
+    stop_grace_period: 300s
+    mem_limit: {{ '1g' if node.role == 'keeper' else '2g' }}
+    pids_limit: 512
+    ulimits:
+      nofile: {soft: 262144, hard: 262144}
+    command: ['clickhouse', '{{ 'keeper' if node.role == 'keeper' else 'server' }}', '--config-file=/etc/stack/config.xml']
+    volumes:
+      - '{{ stack_root }}/{{ node.name }}/config:/etc/stack:ro,Z'
+      - '{{ stack_root }}/{{ node.name }}/data:/var/lib/clickhouse:Z'
+{% if stack_publish_ports | default(true) %}
+    ports:
+{% for port in stack_service_ports[node.role] %}
+      - '{{ stack_node_ips[node.name] }}:{{ port }}:{{ port }}'
+{% endfor %}
+    extra_hosts:
+{% for peer in stack_nodes %}
+      {{ peer.name }}: '{{ stack_node_ips[peer.name] }}'
+{% endfor %}
+{% endif %}
+{% if stack_compose_subnet is defined %}
+    networks:
+      default:
+        ipv4_address: '{{ stack_node_ips[node.name] }}'
+{% endif %}
+{% if node.role == 'keeper' %}
+    healthcheck:
+      disable: true
+{% else %}
+    healthcheck:
+      test: ['CMD', 'clickhouse', 'client', '--config-file=/etc/stack/client.xml', '--query=SELECT 1']
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+{% endif %}
+{% endfor %}
+{% if stack_compose_subnet is defined %}
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: '{{ stack_compose_subnet }}'
+{% endif %}

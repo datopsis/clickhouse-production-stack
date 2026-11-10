@@ -1,0 +1,72 @@
+---
+- name: Discover existing instance identity
+  amazon.aws.ec2_instance_info:
+    region: '{{ stack_region }}'
+    filters:
+      tag:Stack: '{{ stack_name }}'
+      tag:Name: '{{ stack_name }}-{{ node.name }}'
+      instance-state-name: [pending, running, stopping, stopped]
+  register: stack_existing
+
+- name: Refuse ambiguous identities or implicit VM replacement
+  ansible.builtin.assert:
+    that:
+      - stack_existing.instances | length <= 1
+      - >-
+        stack_existing.instances | length == 0 or
+        (stack_existing.instances[0].image_id == stack_ami_id and
+         stack_existing.instances[0].instance_type == stack_instance_type and
+         stack_existing.instances[0].private_ip_address == stack_node_ips[node.name] and
+         stack_existing.instances[0].subnet_id == stack_subnets[node.az] and
+         stack_existing.instances[0].state.name == 'running' and
+         stack_existing.instances[0].public_ip_address is not defined and
+         stack_existing.instances[0].metadata_options.http_tokens == 'required' and
+         stack_existing.instances[0].metadata_options.http_put_response_hop_limit == 1 and
+         stack_existing.instances[0].security_groups | map(attribute='group_id') | list ==
+         [stack_keeper_sg if node.role == 'keeper' else stack_clickhouse_sg])
+    fail_msg: Existing VM differs or is stopped. Investigate explicitly; provisioning does not replace or restart stateful hosts.
+
+- name: Create new private instance
+  amazon.aws.ec2_instance:
+    region: '{{ stack_region }}'
+    name: '{{ stack_name }}-{{ node.name }}'
+    image_id: '{{ stack_ami_id }}'
+    instance_type: '{{ stack_instance_type }}'
+    instance_role: '{{ stack_instance_profile }}'
+    state: running
+    wait: true
+    termination_protection: true
+    instance_initiated_shutdown_behavior: stop
+    network_interfaces:
+      - device_index: 0
+        subnet_id: '{{ stack_subnets[node.az] }}'
+        private_ip_address: '{{ stack_node_ips[node.name] }}'
+        assign_public_ip: false
+        groups: ['{{ stack_keeper_sg if node.role == "keeper" else stack_clickhouse_sg }}']
+    metadata_options:
+      http_tokens: required
+      http_endpoint: enabled
+      http_put_response_hop_limit: 1
+      http_protocol_ipv6: disabled
+      instance_metadata_tags: disabled
+    volumes:
+      - device_name: '{{ stack_root_device | default("/dev/sda1") }}'
+        ebs:
+          volume_type: gp3
+          volume_size: '{{ stack_root_volume_gib }}'
+          encrypted: true
+          kms_key_id: '{{ stack_ebs_kms_key_id }}'
+          delete_on_termination: false
+    tags:
+      Stack: '{{ stack_name }}'
+      Role: '{{ node.role }}'
+      Node: '{{ node.name }}'
+  register: stack_created
+  when: stack_existing.instances | length == 0
+
+- name: Add provisioned instance to SSM inventory
+  ansible.builtin.add_host:
+    name: '{{ node.name }}'
+    groups: '{{ node.role }}'
+    ansible_host: '{{ (stack_existing.instances + (stack_created.instances | default([])))[0].instance_id }}'
+  when: not ansible_check_mode

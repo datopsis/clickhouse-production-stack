@@ -1,0 +1,9 @@
+---
+- name: Exercise the production input guards offline
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files: [../ansible/vars/defaults.yml]
+  tasks:
+    - name: Validate supplied inputs
+      ansible.builtin.import_tasks: ../ansible/tasks/validate.yml
