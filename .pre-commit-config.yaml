@@ -5,6 +5,6 @@ repos:
       - id: lf-line-endings
         name: Reject CRLF line endings
         language: system
-        entry: bash -c 'if git ls-files --eol | grep -E "^i/(crlf|mixed)"; then echo "CRLF line endings found, commit LF only (see .gitattributes)" >&2; exit 1; fi'
+        entry: bash -c 'if git ls-files --eol | grep -E "^i/(crlf|mixed)"; then echo "CRLF found, commit LF only" >&2; exit 1; fi'
         pass_filenames: false
         always_run: true
