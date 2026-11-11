@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Enforce LF line endings: `.gitattributes` normalizes text to LF, a local
+  pre-commit hook and CI reject any committed CRLF.
 - Add the v1 Ansible/AWS and Podman/Compose deployment with a variable-driven
   one-shard, two-replica, three-Keeper default across private multi-AZ VMs.
 - Require IMDSv2, encrypted retained EBS, explicit security-group flows and
