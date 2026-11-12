@@ -4,6 +4,7 @@ import concurrent.futures
 import contextlib
 import json
 import os
+import re
 from pathlib import Path
 import secrets
 import shutil
@@ -61,7 +62,13 @@ def topology(path, image, s3ca=None):
         assert cluster.query('replica1', 'SELECT version()') == '26.8.2.7'
         assert cluster.query('replica1', 'SELECT count() FROM system.replicas') == '0'
         yield cluster
-    except BaseException:
+    except BaseException as error:
+        if hasattr(error, 'body'):
+            # CI-only diagnostics: all credentials are generated hex strings >=32 chars;
+            # also remove long base64/path tokens. Never emit full server logs or SQL bodies.
+            detail = error.body.split('Stack trace:')[0]
+            detail = re.sub(r'[A-Za-z0-9+/=_-]{24,}', '<redacted>', detail)
+            print('Redacted CI exception:', detail[:1500], flush=True)
         # Server logs can contain rendered SQL. Emit only the secret-free assertion/error code.
         print('Backup topology failed; SQL exception codes are preserved, credentials/log bodies are not.', flush=True)
         raise
@@ -255,6 +262,10 @@ def main():
                     paths = cluster.query('replica1', "SELECT uniqExact(zookeeper_path) FROM system.replicas WHERE database='backup_test'")
                     assert paths == '2'
                     passed('renamed table restore: exact signature, distinct Keeper path, original unchanged')
+                    # Resume normal background work after the deterministic incremental-size measurement.
+                    cluster.query('replica1', 'SYSTEM START MERGES ON CLUSTER stack backup_test.events')
+                    for replica in cluster.replicas:
+                        cluster.sync(replica, 'backup_test.events')
                     # Single synchronous writer: strict lower/upper acknowledgement bounds, no retries or async inserts.
                     acknowledged = []
                     stop = threading.Event()

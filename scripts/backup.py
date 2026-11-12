@@ -57,6 +57,9 @@ def refresh(config, aws):
     for key, value in fields.items():
         ET.SubElement(collection, key, overridable='false').text = value
     ET.SubElement(collection, 'url', overridable='false').text = config['url']
+    endpoint = ET.SubElement(ET.SubElement(root, 's3'), 'stack_backup')
+    ET.SubElement(endpoint, 'endpoint').text = config['url']
+    ET.SubElement(endpoint, 'region').text = config['region']
     directory = Path(config['credentials_dir'])
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
     os.chown(directory, 101, 0)

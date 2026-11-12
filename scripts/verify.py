@@ -9,6 +9,13 @@ import ssl
 import uuid
 
 
+class QueryError(RuntimeError):
+    """Safe printable message; response body is private diagnostic data."""
+    def __init__(self, message, body):
+        super().__init__(message)
+        self.body = body
+
+
 class Cluster:
     def __init__(self, config):
         self.config = config
@@ -35,7 +42,7 @@ class Cluster:
             if response.status != 200:
                 # Never print server exception bodies: they may contain query/secret data.
                 code = response.getheader('X-ClickHouse-Exception-Code', 'unknown')
-                raise RuntimeError(f'{name}: query rejected (HTTP {response.status}, ClickHouse code {code})')
+                raise QueryError(f'{name}: query rejected (HTTP {response.status}, ClickHouse code {code})', body)
             return body.strip()
         finally:
             connection.close()
