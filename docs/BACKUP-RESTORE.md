@@ -44,7 +44,8 @@ Source reviewed at `v26.8.2.7-lts`:
 
 A live backup captures the parts visible during collection, not an externally
 chosen global transaction timestamp. The concurrent-write test uses one
-synchronous append-only writer on the coordinator, records every acknowledged
+synchronous append-only writer on the coordinator and a bandwidth-capped full
+backup (to guarantee a measurable overlap window), records every acknowledged
 ID, and asserts all IDs acknowledged before starting BACKUP are restored and
 every restored ID was acknowledged by BACKUP completion. It also checks the
 original data count and payloads. It does not claim that every write completed

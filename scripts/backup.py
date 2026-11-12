@@ -104,7 +104,7 @@ class Backups:
                 raise ValueError('Invalid full backup dependency')
         return sorted(records, key=lambda r: r['completed'])
 
-    def backup(self, force_full=False):
+    def backup(self, force_full=False, max_bandwidth=0):
         database = identifier(self.config['database'])
         # Single-shard coordinator: sync all ReplicatedMergeTree tables before the snapshot.
         tables = self.cluster.query(self.node, f"SELECT name FROM system.tables WHERE database={literal(self.config['database'])} "
@@ -119,8 +119,13 @@ class Backups:
             base = None
         backup_id = uuid.uuid4().hex
         sql = f'BACKUP DATABASE {database} TO {self.destination(backup_id)}'
+        settings = []
         if base:
-            sql += f" SETTINGS base_backup={self.destination(base['id'])}"
+            settings.append(f"base_backup={self.destination(base['id'])}")
+        if max_bandwidth:
+            settings.append(f"max_backup_bandwidth={int(max_bandwidth)}")
+        if settings:
+            sql += ' SETTINGS ' + ', '.join(settings)
         started = time.time()
         self.cluster.query(self.node, sql)
         completed = time.time()

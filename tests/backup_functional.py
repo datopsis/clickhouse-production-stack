@@ -288,13 +288,15 @@ def main():
                         future = executor.submit(writer)
                         retry(lambda: acknowledged[0] if acknowledged else (_ for _ in ()).throw(AssertionError('writer not started')))
                         try:
-                            live = manager.backup()
+                            # A capped full cannot finish in the gap between two writer acknowledgements.
+                            live = manager.backup(True, max_bandwidth=1048576)
                             lower_time, upper_time = live['started'], live['completed']
                         finally:
                             stop.set()
                         future.result(timeout=60)
                     lower = {i for i, t in acknowledged if t < lower_time}
                     upper = {i for i, t in acknowledged if t <= upper_time}
+                    assert upper_time - lower_time >= 2, 'Capped online backup must have a measurable write window'
                     assert lower and len(upper) > len(lower), 'Backup must overlap acknowledged writes'
                     manager.restore(live['id'], 'backup_test.events', 'backup_test.live', 'TABLE')
                     restored = {int(i) for i in cluster.query('replica1', 'SELECT id FROM backup_test.live WHERE id>=101000').splitlines()}

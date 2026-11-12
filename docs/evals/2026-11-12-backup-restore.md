@@ -7,7 +7,9 @@ uploaded JSON artifacts were downloaded and inspected. Permanent copies:
 [amd64](2026-11-12-backup-amd64.json), [arm64](2026-11-12-backup-arm64.json).
 Subsequent assertions additionally pin the observed signatures as constants,
 select the newest catalogued incremental for retention recovery, and reject
-late SQL errors through HTTP response buffering. Their results are in the PR's
+late SQL errors through HTTP response buffering. The online fixture now uses a
+bandwidth-capped full to prevent a fast backup finishing between writer ACKs;
+the overlap and consistency assertions remain mandatory. Their results are in the PR's
 latest run; the measurements below refer specifically to the linked run.
 
 | Assertion | amd64 | arm64 |
