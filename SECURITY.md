@@ -35,8 +35,8 @@ they write temporary session credentials to protected read-only container
 configuration. Runtime renewal, token expiry and IAM enforcement still require
 an authorized AWS rehearsal. No static credentials or CA private keys are
 shipped. SQL never embeds AWS keys. Restrict named-collection and BACKUP/RESTORE
-access to administrators; collection URL overrides and restoration of metadata
-are privileged operations.
+access to administrators; collection URLs and credentials are non-overridable.
+Restoration of metadata is a privileged operation.
 
 Bucket read plus KMS decrypt access exposes all backed-up rows and schema.
 Bucket write can corrupt/replace data or metadata; delete-version permissions

@@ -11,7 +11,7 @@ TLS-authenticated SeaweedFS. See the PR evidence for measured results.
 
 `replica1` is the default designated backup node. The host helper runs
 `SYSTEM SYNC REPLICA` for the selected database's replicated tables, then one
-synchronous `BACKUP DATABASE ... TO S3(stack_backup, url=...)`. One coordinator
+synchronous `BACKUP DATABASE ... TO S3(stack_backup, 'data/ID/')`. One coordinator
 is appropriate for this one-shard topology: it avoids independently uploading
 both replicas. An unavailable or lagging coordinator fails instead of silently
 switching snapshots. Local tables on other replicas are outside this scope.
@@ -102,7 +102,9 @@ no-new-privileges. EC2 retains IMDSv2 and hop limit 1. Every ClickHouse host
 runs a credential-renewal service every five minutes. It obtains only the
 instance role via IMDSv2 (no environment/file/static credential fallback),
 atomically writes UID-101-readable `config/config.d/backup.xml`, and ClickHouse
-loads that read-only mounted named collection. No token appears in SQL or
+loads that read-only mounted named collection. Its URL and credential fields
+are non-overridable; SQL supplies only a relative backup directory. Only the
+admin has named-collection access. No token appears in SQL or
 command arguments. A backup/restore invocation refreshes before issuing SQL.
 ClickHouse freezes collection credentials for an operation: a job that exceeds
 the role session's remaining lifetime may fail and needs a smaller workload or

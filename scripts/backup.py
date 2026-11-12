@@ -56,7 +56,7 @@ def refresh(config, aws):
               'session_token': credentials.token or '', 'region': config['region'], 'use_environment_credentials': 'false'}
     for key, value in fields.items():
         ET.SubElement(collection, key, overridable='false').text = value
-    ET.SubElement(collection, 'url', overridable='true').text = config['url']
+    ET.SubElement(collection, 'url', overridable='false').text = config['url']
     directory = Path(config['credentials_dir'])
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
     os.chown(directory, 101, 0)
@@ -82,7 +82,7 @@ class Backups:
     def destination(self, backup_id):
         if not re.fullmatch(r'[0-9a-f]{32}', backup_id):
             raise ValueError('Invalid backup ID')
-        return f"S3(stack_backup, url={literal(self.config['url'].rstrip('/') + '/data/' + backup_id + '/')})"
+        return f"S3(stack_backup, {literal('data/' + backup_id + '/')})"
 
     def records(self):
         records = []

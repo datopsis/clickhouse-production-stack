@@ -64,6 +64,8 @@ class Contract(unittest.TestCase):
             self.assertIsNone(xml.find(f'users/{user}/password'))
             self.assertEqual(len(xml.findtext(f'users/{user}/password_sha256_hex')), 64)
         self.assertEqual(xml.findtext('profiles/reader/readonly'), '1')
+        self.assertEqual(xml.findtext('users/stack_admin/named_collection_control'), '1')
+        self.assertIsNone(xml.find('users/stack_reader/named_collection_control'))
 
     def test_input_guards(self):
         base = self.variables | yaml.safe_load((ROOT / 'tests/provision-vars.yml').read_text())
