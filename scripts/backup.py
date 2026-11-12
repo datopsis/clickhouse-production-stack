@@ -16,7 +16,7 @@ import botocore.session
 from botocore.credentials import CredentialResolver, InstanceMetadataProvider
 from botocore.utils import InstanceMetadataFetcher
 from botocore.config import Config
-from verify import Cluster
+from verify import Cluster, QueryError
 
 
 def atomic_json(path, value):
@@ -221,8 +221,10 @@ def main():
             status.update(state='success', completed=time.time())
         except BaseException as error:
             status.update(state='failure', completed=time.time(), error_type=type(error).__name__)
-            # Exception messages may contain SDK credentials or server SQL. Never record them.
-            raise RuntimeError('Backup operation failed; inspect status and service health (secrets redacted)') from None
+            # QueryError's printable message contains only node/HTTP/ClickHouse codes, never SQL.
+            # Other exception messages can contain SDK credentials and must stay private.
+            detail = str(error) if isinstance(error, QueryError) else type(error).__name__
+            raise RuntimeError(f'{args.action} failed: {detail} (sensitive details withheld)') from None
         finally:
             if tracks_backup:
                 atomic_json(config['status'], status)

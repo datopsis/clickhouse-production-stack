@@ -1,39 +1,39 @@
 # Backup and restore: native measurements, 12 November 2026
 
 Both native jobs and all existing checks passed in
-[run 43213117854](https://github.com/datopsis/clickhouse-production-stack/actions/runs/43213117854)
-at commit `cb9f29c984b526f30600dcb44d8019b7d2c9f658`. The actual logs and both
+[run 43216232375](https://github.com/datopsis/clickhouse-production-stack/actions/runs/43216232375)
+at commit `e3799e34b17bb3fbb30cb5ce005b562dc58a7db0`. The actual logs and both
 uploaded JSON artifacts were downloaded and inspected. Permanent copies:
 [amd64](2026-11-12-backup-amd64.json), [arm64](2026-11-12-backup-arm64.json).
-Subsequent assertions additionally pin the observed signatures as constants,
-select the newest catalogued incremental for retention recovery, and reject
-late SQL errors through HTTP response buffering. The online fixture now uses a
-bandwidth-capped full to prevent a fast backup finishing between writer ACKs;
-the overlap and consistency assertions remain mandatory. Their results are in the PR's
-latest run; the measurements below refer specifically to the linked run.
+All 12 assertion groups pass on both architectures. Signatures are pinned as
+constants, retention verifies deletion of every old version/delete marker and
+restores the newest catalogued incremental, and HTTP buffering rejects late
+SQL errors. The online fixture uses a bandwidth-capped full to ensure a
+measurable overlap with writer ACKs. The measurements below refer to this run.
 
 | Assertion | amd64 | arm64 |
 | --- | --- | --- |
+| Late SQL error rejected after rows are produced | HTTP 500 / code 395 | same |
 | Full: count / sum(cityHash64(*)) | 100000 / 8071977936022618708 | same |
 | Full: objects / bytes, one coordinator | 14 / 6831058 | same |
 | Incremental: count / checksum | 101000 / 9633416485230737509 | same |
 | Incremental: objects / bytes | 8 / 77458 | same |
 | Manifest contains base and reused-file references | pass | pass |
 | Renamed table: exact full signature; original incremental signature unchanged; different Keeper path | pass | pass |
-| Online writes: pre-start ACKs ⊆ restored IDs ⊆ ACKs by completion | 20 ⊆ 20 ⊆ 21 | 21 ⊆ 22 ⊆ 22 |
+| Online writes: pre-start ACK set ⊆ restored IDs ⊆ end-ACK set (counts) | 19 / 19 / 75 | 15 / 15 / 74 |
 | Missing backup restore fails | HTTP 500 / code 599 | same |
 | Corrupted manifest restore fails | HTTP 500 / code 1000 | same |
 | Wrong S3 credentials fail in native SQL | HTTP 500 / code 499 | same |
 | Real systemd timer: nonzero service exit, failure JSON, verifier refusal | pass | pass |
 | Subsequent successful helper run: fresh success JSON | pass | pass |
-| Fresh full DR: both replica signatures exact, cross-replica write/read works | pass, 3.752 s | pass, 3.618 s |
-| Fresh incremental DR: both signatures exact, cross-replica write/read works | pass, 3.800 s | pass, 3.767 s |
+| Fresh full DR: both replica signatures exact, cross-replica write/read works | pass, 3.810 s | pass, 3.682 s |
+| Fresh incremental DR: both signatures exact, cross-replica write/read works | pass, 3.833 s | pass, 3.716 s |
 | Retention removes three expired family members and all their versions | pass | pass |
-| Fresh retained-family DR: exact signature, cross-replica write/read works | pass, 3.675 s | pass, 3.662 s |
+| Fresh retained-family DR: exact signature, cross-replica write/read works | pass, 3.665 s | pass, 3.555 s |
 
 The retained point contains the non-deterministic number of online writes plus
-one explicit later row: amd64 `101022 / 11969266495042210420`, arm64
-`101024 / 2298852680825790458`. Each restore matches its own source exactly.
+one explicit later row: amd64 `101077 / 5941953911302772774`, arm64
+`101076 / 6597183697568225004`. Each restore matches its own source exactly.
 The live-write test also rejects duplicate/gapped live IDs, checks their payload,
 and checks the unchanged initial data's full count/checksum. These are witnesses
 for one synchronous writer on the coordinator, not a multi-table transaction or
@@ -49,15 +49,15 @@ Compared with the latest successful pre-backup main run
 
 | Job | Before | Measured run | Difference |
 | --- | --- | --- | --- |
-| functional amd64 | 5m24s | 7m57s | +2m33s |
-| functional arm64 | 7m20s | 7m13s | -7s |
-| lint | 1m03s | 1m17s | +14s |
-| Longest job | 7m20s | 7m57s | +37s |
+| functional amd64 | 5m24s | 7m46s | +2m22s |
+| functional arm64 | 7m20s | 7m41s | +21s |
+| lint | 1m03s | 1m04s | +1s |
+| Longest job | 7m20s | 7m46s | +26s |
 
-The new backup test itself took 294.504 seconds on amd64 and 280.484 seconds on
+The new backup test itself took 320.531 seconds on amd64 and 304.798 seconds on
 arm64. These are single-run comparisons: download/build/runner variance masks
-some added work, especially on arm64. Do not interpret the arm64 total as an
-optimization. Both jobs remain bounded by the unchanged 45-minute timeout.
+some added work. Do not interpret the wall-time difference as a controlled
+benchmark of the feature alone. Both jobs remain bounded by the unchanged 45-minute timeout.
 
 ## Decisions and limits
 

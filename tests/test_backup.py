@@ -8,11 +8,11 @@ import sys
 import tempfile
 import time
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from fixture import ROOT
 sys.path.insert(0, str(ROOT / 'scripts'))
-from backup import Backups, check_status, identifier  # noqa: E402
+from backup import Backups, check_status, identifier, main, QueryError  # noqa: E402
 
 
 def record(number, full, completed, database='app'):
@@ -78,6 +78,19 @@ class Retention(unittest.TestCase):
                 result = subprocess.run([sys.executable, str(ROOT / 'scripts/backup.py'), str(config), 'run'], capture_output=True)
             self.assertNotEqual(result.returncode, 0)
             self.assertEqual(json.loads(status.read_text()), {'state': 'running'})
+
+    def test_cli_restore_preserves_safe_error_code_without_server_body(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)
+            config = path / 'config.json'
+            config.write_text(json.dumps({'status': str(path / 'status.json'), 'node': 'replica1'}))
+            manager = Mock()
+            manager.restore.side_effect = QueryError('replica1: query rejected (HTTP 500, ClickHouse code 599)', 'private body')
+            with patch('sys.argv', ['backup.py', str(config), 'restore-table']), \
+                 patch('backup.session'), patch('backup.refresh'), patch('backup.Backups', return_value=manager):
+                with self.assertRaisesRegex(RuntimeError, 'restore-table failed: .*ClickHouse code 599') as result:
+                    main()
+                self.assertNotIn('private body', str(result.exception))
 
     def test_reject_identifier_injection(self):
         for value in ['default; DROP DATABASE x', '../data', "x'", 'a.b.c', '']:

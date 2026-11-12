@@ -1,6 +1,11 @@
 {
   "assertions": [
     {
+      "assertion": "buffered HTTP rejects a late SQL execution error",
+      "result": "pass",
+      "error": "replica1: query rejected (HTTP 500, ClickHouse code 395)"
+    },
+    {
       "assertion": "full backup: exact source count/checksum, one coordinator",
       "result": "pass",
       "signature": "100000\t8071977936022618708",
@@ -22,9 +27,9 @@
     {
       "assertion": "online snapshot: all pre-start ACKs included; every restored ID ACKed by completion",
       "result": "pass",
-      "before": 20,
-      "restored": 20,
-      "by_completion": 21
+      "before": 19,
+      "restored": 19,
+      "by_completion": 75
     },
     {
       "assertion": "missing and corrupted backup restores fail with ClickHouse exception codes",
@@ -45,13 +50,13 @@
       "assertion": "fresh cluster DR and replication: 0",
       "result": "pass",
       "signature": "100000\t8071977936022618708",
-      "restore_seconds": 3.752
+      "restore_seconds": 3.81
     },
     {
       "assertion": "fresh cluster DR and replication: 1",
       "result": "pass",
       "signature": "101000\t9633416485230737509",
-      "restore_seconds": 3.8
+      "restore_seconds": 3.833
     },
     {
       "assertion": "retention deletes expired full/incremental family and preserves newest family",
@@ -61,12 +66,12 @@
     {
       "assertion": "fresh cluster DR and replication: 2",
       "result": "pass",
-      "signature": "101022\t11969266495042210420",
-      "restore_seconds": 3.675
+      "signature": "101077\t5941953911302772774",
+      "restore_seconds": 3.665
     }
   ],
-  "seconds": 294.50400078099995,
-  "run": "https://github.com/datopsis/clickhouse-production-stack/actions/runs/43213117854",
-  "commit": "cb9f29c984b526f30600dcb44d8019b7d2c9f658",
+  "seconds": 320.531188852,
+  "run": "https://github.com/datopsis/clickhouse-production-stack/actions/runs/43216232375",
+  "commit": "e3799e34b17bb3fbb30cb5ce005b562dc58a7db0",
   "architecture": "amd64"
 }
