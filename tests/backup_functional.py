@@ -229,6 +229,7 @@ def main():
                     manager.s3.put_bucket_versioning(Bucket='backups', VersioningConfiguration={'Status': 'Enabled'})
                     late_error = sql_failure(lambda: cluster.query('replica1',
                         'SELECT number, throwIf(number=2) FROM numbers(5) SETTINGS max_block_size=1'))
+                    assert 'ClickHouse code 395)' in late_error
                     passed('buffered HTTP rejects a late SQL execution error', error=late_error)
                     cluster.query('replica1', 'CREATE DATABASE backup_test ON CLUSTER stack ENGINE=Atomic')
                     cluster.query('replica1', "CREATE TABLE backup_test.events ON CLUSTER stack (id UInt64, payload String) "
@@ -308,6 +309,8 @@ def main():
                     corrupt_id = 'f' * 32
                     manager.s3.put_object(Bucket='backups', Key=manager.prefix + 'data/' + corrupt_id + '/.backup', Body=b'corrupt')
                     corrupt_error = sql_failure(lambda: manager.restore(corrupt_id, 'backup_test.events', 'backup_test.corrupt', 'TABLE'))
+                    assert 'ClickHouse code 599)' in missing_error
+                    assert 'ClickHouse code 1000)' in corrupt_error
                     passed('missing and corrupted backup restores fail with ClickHouse exception codes', missing=missing_error, corrupt=corrupt_error)
                     # Actual timer ExecStart program, including atomic status, nonzero exit, and verifier rejection.
                     bad_credentials = work / 'wrong.json'
@@ -322,6 +325,7 @@ def main():
                     # Explicit wrong credential SQL tests ClickHouse's S3 writer, beyond the host SDK failure.
                     credentials_error = sql_failure(lambda: cluster.query('replica1', "BACKUP TABLE backup_test.events TO S3('https://172.30.243.53:8333/backups/denied/', "
                                                    + "'" + secrets.token_hex(16) + "', '" + secrets.token_hex(32) + "')"))
+                    assert 'ClickHouse code 499)' in credentials_error
                     passed('wrong S3 credentials fail; real systemd timer records failure and nonzero exit; verifier refuses', error=credentials_error)
                     authorize(config, cluster, path)
                     # New family makes the old family eligible; expire timestamps, not dependency rules.
@@ -354,6 +358,10 @@ def main():
                             expired = dr.retain()
                             assert full['id'] in expired and incremental['id'] in expired
                             assert objects(dr, full['id']) == [] and objects(dr, incremental['id']) == []
+                            for backup_id in expired:
+                                for prefix in [dr.prefix + 'data/' + backup_id + '/', dr.prefix + 'catalog/' + backup_id + '.json']:
+                                    for page in dr.s3.get_paginator('list_object_versions').paginate(Bucket='backups', Prefix=prefix):
+                                        assert not page.get('Versions') and not page.get('DeleteMarkers')
                             assert {r['full'] for r in dr.records()} == {newest['id']}
                             passed('retention deletes expired full/incremental family and preserves newest family', deleted=len(expired))
                         began = time.monotonic()
