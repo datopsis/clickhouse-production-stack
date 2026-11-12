@@ -213,6 +213,7 @@ def main():
                             cluster.query('replica1', f"INSERT INTO backup_test.events VALUES ({index}, 'live')")
                             acknowledged.append((index, time.monotonic()))
                             index += 1
+                            stop.wait(0.02)
                     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
                         future = executor.submit(writer)
                         retry(lambda: acknowledged[0] if acknowledged else (_ for _ in ()).throw(AssertionError('writer not started')))
