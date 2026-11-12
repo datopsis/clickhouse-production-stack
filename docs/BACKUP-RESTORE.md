@@ -133,6 +133,11 @@ sudo systemctl list-timers clickhouse-backup.timer
 sudo cat /srv/clickhouse-stack/backup-status.json
 ```
 
+The HTTPS client buffers responses with `wait_end_of_query=1` so a late SQL
+error cannot masquerade as an already-streamed HTTP 200. Native CI explicitly
+checks a query that throws after producing rows. See the
+[HTTP response caveats](https://clickhouse.com/docs/interfaces/http#http-response-codes-caveats).
+
 Force a new full with the same lock and status handling:
 
 ```sh

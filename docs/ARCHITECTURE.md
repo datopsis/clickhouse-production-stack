@@ -116,7 +116,7 @@ rehearsal is required before any operational claim. None has occurred.
   agent guidance, roadmap and hardened CI.
 - `datopsis/nginx-ubi` at `aa60c0612e1043f77df7476ce97e30724719e784`:
   agent guidance, roadmap and CI conventions.
-- `datopsis/seaweedfs-ubi` at `1bfd88f26ff63f9b33839ab1d5477e8f7f57376c`:
+- `datopsis/seaweedfs-ubi` at `fd9b0001ee86a432faf773d40ab6f528dbfdad67`:
   agent guidance and CI; its work plan is `docs/README.md` (there is no
   `docs/ROADMAP.md` at that revision).
 - [ClickHouse TLS configuration](https://clickhouse.com/docs/guides/sre/tls/configuring-tls)

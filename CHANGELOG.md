@@ -21,4 +21,4 @@
 - Add hash-locked tools, pinned collections/actions/image source, lint,
   secret scanning, offline AWS doubles and native Podman topology tests.
 - Document control ownership, first-release limitations and ordered remaining
-  observability, backup/restore, upgrades, multiple-shard and Kubernetes work.
+  observability, upgrades, multiple-shard and Kubernetes work.

@@ -150,6 +150,10 @@ def timer_failure(path, config):
         code = run('systemctl', 'show', 'clickhouse-backup.service', '--property=ExecMainStatus', '--value', capture_output=True).stdout.strip()
         assert int(code) != 0
         assert json.loads(Path(config['status']).read_text())['error_type'] == 'ClientError'
+    except BaseException:
+        journal = run('journalctl', '-u', 'clickhouse-backup.service', '-n', '30', '--no-pager', capture_output=True).stdout
+        print(re.sub(r'[A-Za-z0-9+/=_-]{24,}', '<redacted>', journal), flush=True)
+        raise
     finally:
         run('systemctl', 'stop', 'clickhouse-backup.timer')
         run('systemctl', 'stop', 'clickhouse-backup.service')
@@ -223,6 +227,9 @@ def main():
                     retry(ready)
                     manager.s3.create_bucket(Bucket='backups')
                     manager.s3.put_bucket_versioning(Bucket='backups', VersioningConfiguration={'Status': 'Enabled'})
+                    late_error = sql_failure(lambda: cluster.query('replica1',
+                        'SELECT number, throwIf(number=2) FROM numbers(5) SETTINGS max_block_size=1'))
+                    passed('buffered HTTP rejects a late SQL execution error', error=late_error)
                     cluster.query('replica1', 'CREATE DATABASE backup_test ON CLUSTER stack ENGINE=Atomic')
                     cluster.query('replica1', "CREATE TABLE backup_test.events ON CLUSTER stack (id UInt64, payload String) "
                                   "ENGINE=ReplicatedMergeTree('/backup-test/{uuid}/{shard}', '{replica}') ORDER BY id")
@@ -231,7 +238,7 @@ def main():
                     cluster.query('replica1', "INSERT INTO backup_test.events SELECT number, hex(SHA256(toString(number))) FROM numbers(100000)")
                     full = manager.backup(True)
                     first = signature(cluster, 'backup_test.events')
-                    assert first.split('\t')[0] == '100000'
+                    assert first == '100000\t8071977936022618708'
                     full_objects = objects(manager, full['id'])
                     full_bytes = sum(o['Size'] for o in full_objects)
                     assert full_bytes > 1000000
@@ -241,7 +248,7 @@ def main():
                     cluster.query('replica1', "INSERT INTO backup_test.events SELECT number+100000, hex(SHA256(toString(number+100000))) FROM numbers(1000)")
                     incremental = manager.backup()
                     second = signature(cluster, 'backup_test.events')
-                    assert second.split('\t')[0] == '101000'
+                    assert second == '101000\t9633416485230737509'
                     inc_objects = objects(manager, incremental['id'])
                     inc_bytes = sum(o['Size'] for o in inc_objects)
                     manifest_key = manager.prefix + 'data/' + incremental['id'] + '/.backup'
@@ -326,7 +333,10 @@ def main():
                     config_path.write_text(json.dumps(config))
                     result = subprocess.run([sys.executable, str(ROOT / 'scripts/backup.py'), str(config_path), 'run'], capture_output=True)
                     assert result.returncode == 0, 'Timer success command failed'
-                    check_status(config['status'], 3600)
+                    success = check_status(config['status'], 3600)
+                    assert success['backup']['full'] == newest['id']
+                    assert success['backup']['id'] == manager.records()[-1]['id']
+                    points[-1] = (success['backup'], newest_signature)
                     passed('timer success command records a fresh successful backup')
                 # Source is down. Each DR invocation starts all FIVE nodes on NEW bind directories.
                 for index, (record, expected) in enumerate(points):

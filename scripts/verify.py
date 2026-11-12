@@ -36,10 +36,10 @@ class Cluster:
         connection = http.client.HTTPConnection(name, 8443, timeout=30)
         connection.sock = self.connect(name, 8443)
         try:
-            connection.request('POST', '/', body=sql.encode(), headers={'Authorization': f'Basic {auth}'})
+            connection.request('POST', '/?wait_end_of_query=1', body=sql.encode(), headers={'Authorization': f'Basic {auth}'})
             response = connection.getresponse()
             body = response.read().decode()
-            if response.status != 200:
+            if response.status != 200 or response.getheader('X-ClickHouse-Exception-Code') not in (None, '0'):
                 # Never print server exception bodies: they may contain query/secret data.
                 code = response.getheader('X-ClickHouse-Exception-Code', 'unknown')
                 raise QueryError(f'{name}: query rejected (HTTP {response.status}, ClickHouse code {code})', body)
