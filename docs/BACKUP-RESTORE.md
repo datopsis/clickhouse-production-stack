@@ -67,8 +67,10 @@ protection. EC2 remains provisioned by the existing Ansible modules.
 Required inputs are `stack_backup_bucket`, `stack_clickhouse_instance_profile`
 and its existing `stack_clickhouse_role_name`. The ClickHouse profile must be
 separate from Keepers' SSM-only `stack_instance_profile`. The operator owns
-these profile/role relationships, scoped controller CloudFormation permissions,
-PassRole, SSM policy, private S3 endpoints and KMS administration. No real AWS
+these profile/role relationships (profile names, not ARNs), scoped controller CloudFormation permissions,
+PassRole, SSM policy, private S3 endpoints and KMS administration. Provisioning
+refuses an existing VM with a different attached profile; it does not silently
+replace it or attach a new role. No real AWS
 request is part of tests. The root KMS statement delegates policy management
 to the account, not public or universal KMS access.
 

@@ -46,6 +46,7 @@ def topology(path, image, s3ca=None):
     compose_file.write_text(yaml.safe_dump(compose))
     command = ['podman-compose', '-f', str(compose_file)]
     for node in variables['stack_nodes']:
+        assert not any((path / node['name'] / 'data').iterdir()), 'DR data directory is not fresh'
         run('chown', '-R', '101:0', str(path / node['name']))
     config = {'nodes': variables['stack_nodes'], 'addresses': variables['stack_node_ips'],
               'ca': str(path / 'ca.crt'), 'cert': str(path / 'replica1.crt'), 'key': str(path / 'replica1.key'),
@@ -58,6 +59,7 @@ def topology(path, image, s3ca=None):
         retry(cluster.quorum)
         retry(cluster.read_only)
         assert cluster.query('replica1', 'SELECT version()') == '26.8.2.7'
+        assert cluster.query('replica1', 'SELECT count() FROM system.replicas') == '0'
         yield cluster
     except BaseException:
         # Server logs can contain rendered SQL. Emit only the secret-free assertion/error code.
@@ -217,7 +219,7 @@ def main():
                     cluster.query('replica1', 'CREATE DATABASE backup_test ON CLUSTER stack ENGINE=Atomic')
                     cluster.query('replica1', "CREATE TABLE backup_test.events ON CLUSTER stack (id UInt64, payload String) "
                                   "ENGINE=ReplicatedMergeTree('/backup-test/{uuid}/{shard}', '{replica}') ORDER BY id")
-                    cluster.query('replica1', 'SYSTEM STOP MERGES backup_test.events ON CLUSTER stack')
+                    cluster.query('replica1', 'SYSTEM STOP MERGES ON CLUSTER stack backup_test.events')
                     # Incompressible deterministic payload: unchanged large parts must be referenced, not copied.
                     cluster.query('replica1', "INSERT INTO backup_test.events SELECT number, hex(SHA256(toString(number))) FROM numbers(100000)")
                     full = manager.backup(True)
@@ -260,16 +262,17 @@ def main():
                         index = 101000
                         while not stop.is_set():
                             cluster.query('replica1', f"INSERT INTO backup_test.events VALUES ({index}, 'live')")
-                            acknowledged.append((index, time.monotonic()))
+                            acknowledged.append((index, time.time()))
                             index += 1
                             stop.wait(0.02)
                     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
                         future = executor.submit(writer)
                         retry(lambda: acknowledged[0] if acknowledged else (_ for _ in ()).throw(AssertionError('writer not started')))
-                        lower_time = time.monotonic()
-                        live = manager.backup()
-                        upper_time = time.monotonic()
-                        stop.set()
+                        try:
+                            live = manager.backup()
+                            lower_time, upper_time = live['started'], live['completed']
+                        finally:
+                            stop.set()
                         future.result(timeout=60)
                     lower = {i for i, t in acknowledged if t < lower_time}
                     upper = {i for i, t in acknowledged if t <= upper_time}

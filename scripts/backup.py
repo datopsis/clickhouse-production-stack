@@ -118,9 +118,11 @@ class Backups:
         sql = f'BACKUP DATABASE {database} TO {self.destination(backup_id)}'
         if base:
             sql += f" SETTINGS base_backup={self.destination(base['id'])}"
+        started = time.time()
         self.cluster.query(self.node, sql)
+        completed = time.time()
         record = {'id': backup_id, 'full': base['id'] if base else backup_id, 'database': self.config['database'],
-                  'started': now, 'completed': time.time()}
+                  'started': started, 'completed': completed}
         self.s3.put_object(Bucket=self.bucket, Key=self.prefix + 'catalog/' + backup_id + '.json', Body=json.dumps(record).encode())
         return record
 
@@ -148,6 +150,20 @@ class Backups:
     def restore(self, backup_id, source, target, kind):
         if source == target:
             raise ValueError('Restore requires a NEW name; use a new database name even during DR')
+        identifier(source)
+        identifier(target)
+        if kind == 'TABLE':
+            if '.' not in source or '.' not in target:
+                raise ValueError('Table names must be database-qualified')
+            database, table = target.split('.')
+            exists = f"SELECT count() FROM system.tables WHERE database={literal(database)} AND name={literal(table)}"
+        elif kind == 'DATABASE' and '.' not in source and '.' not in target:
+            exists = f"SELECT count() FROM system.databases WHERE name={literal(target)}"
+        else:
+            raise ValueError('Invalid restore kind or database name')
+        for replica in self.cluster.replicas:
+            if self.cluster.query(replica, exists) != '0':
+                raise ValueError('Restore target already exists; choose a new name')
         # Atomic DB + {uuid} paths isolate restored tables from the original Keeper znodes.
         sql = f'RESTORE {kind} {identifier(source)} AS {identifier(target)} ON CLUSTER stack FROM {self.destination(backup_id)}'
         return self.cluster.query(self.node, sql)

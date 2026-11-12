@@ -30,12 +30,17 @@ def run(kind):
         assert encryption['ServerSideEncryptionByDefault']['KMSMasterKeyID'] == {'Fn::GetAtt': ['Key', 'Arn']}
         assert encryption['BucketKeyEnabled'] is False
         assert resources['Key']['Properties']['EnableKeyRotation']
+        if bucket.get('ObjectLockEnabled'):
+            assert bucket['ObjectLockConfiguration'] == {
+                'ObjectLockEnabled': 'Enabled', 'Rule': {'DefaultRetention': {'Mode': 'GOVERNANCE', 'Days': 30}}}
         for name in ['Key', 'Bucket']:
             assert resources[name]['DeletionPolicy'] == resources[name]['UpdateReplacePolicy'] == 'Retain'
         rules = bucket['LifecycleConfiguration']['Rules']
         assert rules == [{'Id': 'AbortIncompleteMultipart', 'Status': 'Enabled', 'AbortIncompleteMultipartUpload': {'DaysAfterInitiation': 7}}]
         policy = resources['BucketPolicy']['Properties']['PolicyDocument']['Statement']
         assert policy[0]['Effect'] == 'Deny' and policy[0]['Condition']['Bool']['aws:SecureTransport'] == 'false'
+        assert {statement['Sid'] for statement in policy} == {
+            'TLSOnly', 'RefuseExplicitNonKMS', 'RefuseWrongKey', 'RefuseKMSWithoutExplicitKey', 'RefuseCustomerEncryptionKey'}
         iam = resources['InstancePolicy']['Properties']
         assert iam['Roles'] == ['offline-clickhouse-role']
         statements = iam['PolicyDocument']['Statement']
@@ -64,6 +69,8 @@ def run(kind):
             module.exit_json(changed=False, instances=[dict(
                 instance_id='i-0123456789abcdef0', image_id='ami-0123456789abcdef0', instance_type='m7i.large',
                 private_ip_address=f'10.0.{zone}.{10 if role else 11}', subnet_id=f'subnet-{zone:017d}',
+                iam_instance_profile={'arn': 'arn:aws:iam::000000000000:instance-profile/' +
+                                      ('offline-test-profile' if role else 'offline-clickhouse-profile')},
                 state={'name': 'running'}, metadata_options={'http_tokens': 'required', 'http_put_response_hop_limit': 1},
                 security_groups=[{'group_id': 'sg-00000000000000001' if role else 'sg-00000000000000002'}])])
         module.exit_json(changed=False, instances=[])

@@ -1,5 +1,5 @@
 ---
-- name: Provision private EC2 hosts without configuring the AWS account
+- name: Provision private EC2 hosts and dedicated backup resources
   hosts: localhost
   connection: local
   gather_facts: false

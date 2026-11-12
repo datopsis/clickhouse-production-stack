@@ -8,6 +8,9 @@ ANSIBLE_COLLECTIONS_PATH="$PWD/tests/mocks" AWS_EC2_METADATA_DISABLED=true \
   ansible-playbook ansible/playbooks/provision.yml --check -e @tests/provision-vars.yml
 ANSIBLE_COLLECTIONS_PATH="$PWD/tests/mocks" AWS_EC2_METADATA_DISABLED=true STACK_MOCK_EXISTING=1 STACK_MOCK_MAIN_ROUTE=1 \
   ansible-playbook ansible/playbooks/provision.yml --check -e @tests/provision-vars.yml
+ANSIBLE_COLLECTIONS_PATH="$PWD/tests/mocks" AWS_EC2_METADATA_DISABLED=true \
+  ansible-playbook ansible/playbooks/provision.yml --check -e @tests/provision-vars.yml \
+  -e '{"stack_backup_object_lock": true, "stack_backup_object_lock_mode": "GOVERNANCE", "stack_backup_object_lock_days": 30}'
 ansible-playbook ansible/playbooks/deploy.yml --syntax-check
 ansible-playbook ansible/playbooks/verify.yml --syntax-check
 if ANSIBLE_COLLECTIONS_PATH="$PWD/tests/mocks" AWS_EC2_METADATA_DISABLED=true STACK_MOCK_PUBLIC_SUBNET=1 \
