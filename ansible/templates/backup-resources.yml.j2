@@ -82,6 +82,21 @@ Resources:
               'Null': {'s3:x-amz-server-side-encryption-aws-kms-key-id': 'false'}
               StringNotEquals:
                 's3:x-amz-server-side-encryption-aws-kms-key-id': {'Fn::GetAtt': [Key, Arn]}
+          - Sid: RefuseKMSWithoutExplicitKey
+            Effect: Deny
+            Principal: '*'
+            Action: s3:PutObject
+            Resource: {'Fn::Sub': '${Bucket.Arn}/*'}
+            Condition:
+              StringEquals: {'s3:x-amz-server-side-encryption': 'aws:kms'}
+              'Null': {'s3:x-amz-server-side-encryption-aws-kms-key-id': 'true'}
+          - Sid: RefuseCustomerEncryptionKey
+            Effect: Deny
+            Principal: '*'
+            Action: s3:PutObject
+            Resource: {'Fn::Sub': '${Bucket.Arn}/*'}
+            Condition:
+              'Null': {'s3:x-amz-server-side-encryption-customer-algorithm': 'false'}
   InstancePolicy:
     Type: AWS::IAM::Policy
     Properties:

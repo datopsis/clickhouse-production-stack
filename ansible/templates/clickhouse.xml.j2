@@ -33,6 +33,7 @@
       </shard>
     </stack>
   </remote_servers>
+  <distributed_ddl><path>/clickhouse/task_queue/ddl</path></distributed_ddl>
   <zookeeper>
     <identity>{{ stack_secrets.keeper_identity | e }}</identity>
 {% for peer in stack_nodes if peer.role == 'keeper' %}

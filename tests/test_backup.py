@@ -1,5 +1,4 @@
 """Retention safety, interruption, lock, and status contracts without AWS calls."""
-import contextlib
 import fcntl
 import io
 import json

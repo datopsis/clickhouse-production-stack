@@ -218,11 +218,14 @@ clients or dropping the original is a separate operator action.
    **fresh Keeper storage**, new stack namespace, private addresses and
    certificates. Reuse the selected version and hardened deployment contract.
    Do not attach old Keeper snapshots or point this cluster at live Keepers.
-3. Give the isolated ClickHouse role read access to the backup prefix and KMS
-   decrypt permission through the owner's scoped DR process. Do not apply a
-   second backup resource stack over the source bucket. Deploy the runtime and
-   disable its backup timer until DR verification completes. Keep its own
-   future backup prefix separate from production's managed prefix.
+3. Provision the isolated stack with its **own** backup bucket and normal role
+   permissions, then deploy it normally, including its initial bootstrap backup.
+   Never apply a second resource stack over the source bucket. Stop the isolated
+   backup timer. Add scoped read access to the source bucket/prefix and KMS
+   decrypt permission to its role through the owner's DR process. Restore using
+   a copy of `backup.json` whose bucket, prefix and URL select the source;
+   retain the isolated stack's own node, verification and credential paths.
+   Its normal schedule must continue using its own bucket after the drill.
 4. Make the S3 collection and backup URL refer to the source prefix, choose a
    known completed ID, and restore the database under a new name using the
    command above. Preserve the full when restoring an incremental.

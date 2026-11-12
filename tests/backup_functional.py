@@ -6,6 +6,8 @@ import json
 import os
 from pathlib import Path
 import secrets
+import shutil
+from datetime import datetime, timedelta, timezone
 import subprocess
 import sys
 import tempfile
@@ -14,6 +16,7 @@ import time
 import xml.etree.ElementTree as ET
 
 import yaml
+from jinja2 import Template
 from fixture import fixture, openssl, ROOT
 from functional import run, retry, must_fail
 sys.path.insert(0, str(ROOT / 'scripts'))
@@ -41,7 +44,7 @@ def topology(path, image, s3ca=None):
     compose = yaml.safe_load(compose_file.read_text())
     compose['networks'] = {'default': {'external': True, 'name': 'stack-backup-test'}}
     compose_file.write_text(yaml.safe_dump(compose))
-    command = ['podman-compose', '-p', 'stack-backup-test', '-f', str(compose_file)]
+    command = ['podman-compose', '-f', str(compose_file)]
     for node in variables['stack_nodes']:
         run('chown', '-R', '101:0', str(path / node['name']))
     config = {'nodes': variables['stack_nodes'], 'addresses': variables['stack_node_ips'],
@@ -112,6 +115,43 @@ def seaweed(path, image, ca_path):
             run('podman', 'rm', '-f', name)
 
 
+def timer_failure(path, config):
+    """Run the actual rendered production service via a real systemd timer."""
+    shutil.copytree(Path(sys.prefix), path / 'venv', symlinks=True)
+    for name in ['backup.py', 'verify.py']:
+        shutil.copy2(ROOT / 'scripts' / name, path / name)
+    schedule = (datetime.now(timezone.utc) + timedelta(seconds=10)).strftime('%Y-%m-%d %H:%M:%S UTC')
+    units = ['clickhouse-stack.service', 'clickhouse-backup.service', 'clickhouse-backup.timer']
+    try:
+        for unit in units:
+            template = 'stack.service.j2' if unit == 'clickhouse-stack.service' else unit + '.j2'
+            content = Template((ROOT / 'ansible/templates' / template).read_text()).render(
+                stack_root=str(path), stack_backup_schedule=schedule)
+            (Path('/run/systemd/system') / unit).write_text(content)
+        run('systemctl', 'daemon-reload')
+        run('systemctl', 'start', 'clickhouse-stack.service')
+        run('systemctl', 'start', 'clickhouse-backup.timer')
+        def failed():
+            status_path = Path(config['status'])
+            assert status_path.exists(), 'Timer has not run'
+            assert json.loads(status_path.read_text())['state'] == 'failure'
+            result = run('systemctl', 'show', 'clickhouse-backup.service', '--property=Result', '--value', capture_output=True).stdout.strip()
+            assert result == 'exit-code', result
+        retry(failed, seconds=90)
+        code = run('systemctl', 'show', 'clickhouse-backup.service', '--property=ExecMainStatus', '--value', capture_output=True).stdout.strip()
+        assert int(code) != 0
+        assert json.loads(Path(config['status']).read_text())['error_type'] == 'ClientError'
+    finally:
+        run('systemctl', 'stop', 'clickhouse-backup.timer')
+        run('systemctl', 'stop', 'clickhouse-backup.service')
+        # Leave Compose running for the remaining assertions; remove its unit after clearing active state.
+        run('systemctl', 'stop', 'clickhouse-stack.service')
+        for unit in units:
+            (Path('/run/systemd/system') / unit).unlink(missing_ok=True)
+        run('systemctl', 'daemon-reload')
+        run('podman-compose', '-f', str(path / 'compose.yml'), 'up', '-d')
+
+
 def configuration(path, credentials, ca):
     return {'node': 'replica1', 'verification': str(path / 'verification.json'),
             'credentials_dir': str(path / 'replica1/config/config.d'), 'status': str(path / 'backup-status.json'),
@@ -125,6 +165,15 @@ def authorize(config, cluster, path):
     for name in cluster.replicas:
         refresh(config | {'credentials_dir': str(path / name / 'config/config.d')}, session(config))
         cluster.query(name, 'SYSTEM RELOAD CONFIG')
+
+
+def sql_failure(fn):
+    try:
+        fn()
+    except RuntimeError as error:
+        assert 'query rejected (HTTP' in str(error), str(error)
+        return str(error)
+    raise AssertionError('SQL unexpectedly succeeded')
 
 
 def signature(cluster, table):
@@ -141,7 +190,7 @@ def main():
         raise SystemExit('Run using the rootful native test runtime')
     image, weed_image, evidence_path = sys.argv[1:]
     start = time.monotonic()
-    with tempfile.TemporaryDirectory(prefix='stack-backup-') as directory:
+    with tempfile.TemporaryDirectory(prefix='stack-backup-', dir='/srv') as directory:
         work = Path(directory)
         # Independent S3 CA, kept across every fresh cluster incarnation.
         ca = work / 's3-ca'
@@ -228,30 +277,31 @@ def main():
                     manager.restore(live['id'], 'backup_test.events', 'backup_test.live', 'TABLE')
                     restored = {int(i) for i in cluster.query('replica1', 'SELECT id FROM backup_test.live WHERE id>=101000').splitlines()}
                     assert lower <= restored <= upper
-                    assert len(restored) == len(set(restored))
-                    assert cluster.query('replica1', 'SELECT count() FROM backup_test.live WHERE id<101000') == '101000'
+                    assert int(cluster.query('replica1', 'SELECT count() FROM backup_test.live WHERE id>=101000')) == len(restored)
+                    assert restored == set(range(101000, max(restored) + 1))
+                    assert cluster.query('replica1', 'SELECT count(), sum(cityHash64(*)) FROM backup_test.live WHERE id<101000') == second
                     assert cluster.query('replica1', 'SELECT count() FROM backup_test.live WHERE id>=101000 AND payload!=\'live\'') == '0'
                     passed('online snapshot: all pre-start ACKs included; every restored ID ACKed by completion',
                            before=len(lower), restored=len(restored), by_completion=len(upper))
-                    must_fail(lambda: manager.restore('0' * 32, 'backup_test.events', 'backup_test.missing', 'TABLE'))
+                    missing_error = sql_failure(lambda: manager.restore('0' * 32, 'backup_test.events', 'backup_test.missing', 'TABLE'))
                     corrupt_id = 'f' * 32
                     manager.s3.put_object(Bucket='backups', Key=manager.prefix + 'data/' + corrupt_id + '/.backup', Body=b'corrupt')
-                    must_fail(lambda: manager.restore(corrupt_id, 'backup_test.events', 'backup_test.corrupt', 'TABLE'))
-                    passed('missing and corrupted backup restores fail with ClickHouse exception codes')
+                    corrupt_error = sql_failure(lambda: manager.restore(corrupt_id, 'backup_test.events', 'backup_test.corrupt', 'TABLE'))
+                    passed('missing and corrupted backup restores fail with ClickHouse exception codes', missing=missing_error, corrupt=corrupt_error)
                     # Actual timer ExecStart program, including atomic status, nonzero exit, and verifier rejection.
                     bad_credentials = work / 'wrong.json'
                     bad_credentials.write_text(json.dumps({'aws_access_key_id': secrets.token_hex(16), 'aws_secret_access_key': secrets.token_hex(32)}))
                     bad_config = config | {'test_credentials_file': str(bad_credentials)}
                     config_path = path / 'backup.json'
                     config_path.write_text(json.dumps(bad_config))
-                    result = subprocess.run([sys.executable, str(ROOT / 'scripts/backup.py'), str(config_path), 'run'], capture_output=True)
-                    assert result.returncode != 0
-                    assert json.loads(Path(config['status']).read_text())['state'] == 'failure'
+                    timer_failure(path, config)
+                    retry(cluster.quorum)
+                    retry(cluster.read_only)
                     must_fail(lambda: check_status(config['status'], 3600))
                     # Explicit wrong credential SQL tests ClickHouse's S3 writer, beyond the host SDK failure.
-                    must_fail(lambda: cluster.query('replica1', "BACKUP TABLE backup_test.events TO S3('https://172.30.243.53:8333/backups/denied/', "
+                    credentials_error = sql_failure(lambda: cluster.query('replica1', "BACKUP TABLE backup_test.events TO S3('https://172.30.243.53:8333/backups/denied/', "
                                                    + "'" + secrets.token_hex(16) + "', '" + secrets.token_hex(32) + "')"))
-                    passed('wrong S3 credentials fail; timer command exits nonzero, records failure, verifier refuses')
+                    passed('wrong S3 credentials fail; real systemd timer records failure and nonzero exit; verifier refuses', error=credentials_error)
                     authorize(config, cluster, path)
                     # New family makes the old family eligible; expire timestamps, not dependency rules.
                     newest = manager.backup(True)

@@ -51,6 +51,7 @@ class Contract(unittest.TestCase):
                 self.assertEqual(xml.findtext('keeper_server/raft_configuration/secure'), 'true')
                 self.assertEqual(len(xml.findall('keeper_server/raft_configuration/server')), 3)
             else:
+                self.assertEqual(xml.findtext('distributed_ddl/path'), '/clickhouse/task_queue/ddl')
                 self.assertEqual(len(xml.findall('remote_servers/stack/shard/replica')), 2)
                 self.assertEqual(len(xml.findall('zookeeper/node')), 3)
                 self.assertTrue(all(n.findtext('secure') == '1' for n in xml.findall('zookeeper/node')))
