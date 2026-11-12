@@ -1,10 +1,12 @@
 """Offline AWS contract doubles. Fail closed outside check mode; no SDK/network."""
 import os
+import json
 from ansible.module_utils.basic import AnsibleModule
 
 
 def run(kind):
     specs = {
+        'cloudformation': dict(stack_name='str', region='str', state='str', capabilities='list', template_body='str', termination_protection='bool'),
         'ec2_vpc_subnet_info': dict(region='str', subnet_ids='list'),
         'ec2_security_group': dict(region='str', name='str', description='str', vpc_id='str', rules='list',
                                   rules_egress='list', purge_rules='bool', purge_rules_egress='bool'),
@@ -18,6 +20,33 @@ def run(kind):
     if not module.check_mode:
         module.fail_json(msg='AWS doubles may ONLY run in check mode')
     p = module.params
+    if kind == 'cloudformation':
+        resources = json.loads(p['template_body'])['Resources']
+        bucket = resources['Bucket']['Properties']
+        assert bucket['VersioningConfiguration']['Status'] == 'Enabled'
+        assert all(bucket['PublicAccessBlockConfiguration'].values())
+        encryption = bucket['BucketEncryption']['ServerSideEncryptionConfiguration'][0]
+        assert encryption['ServerSideEncryptionByDefault']['SSEAlgorithm'] == 'aws:kms'
+        assert encryption['ServerSideEncryptionByDefault']['KMSMasterKeyID'] == {'Fn::GetAtt': ['Key', 'Arn']}
+        assert encryption['BucketKeyEnabled'] is False
+        assert resources['Key']['Properties']['EnableKeyRotation']
+        for name in ['Key', 'Bucket']:
+            assert resources[name]['DeletionPolicy'] == resources[name]['UpdateReplacePolicy'] == 'Retain'
+        rules = bucket['LifecycleConfiguration']['Rules']
+        assert rules == [{'Id': 'AbortIncompleteMultipart', 'Status': 'Enabled', 'AbortIncompleteMultipartUpload': {'DaysAfterInitiation': 7}}]
+        policy = resources['BucketPolicy']['Properties']['PolicyDocument']['Statement']
+        assert policy[0]['Effect'] == 'Deny' and policy[0]['Condition']['Bool']['aws:SecureTransport'] == 'false'
+        iam = resources['InstancePolicy']['Properties']
+        assert iam['Roles'] == ['offline-clickhouse-role']
+        statements = iam['PolicyDocument']['Statement']
+        assert statements[0]['Condition']['StringLike']['s3:prefix'] == ['clickhouse/*']
+        assert statements[1]['Resource'] == {'Fn::Sub': '${Bucket.Arn}/clickhouse/*'}
+        assert set(statements[1]['Action']) == {'s3:GetObject', 's3:GetObjectVersion', 's3:PutObject', 's3:DeleteObject',
+                                              's3:DeleteObjectVersion', 's3:AbortMultipartUpload'}
+        assert statements[2]['Action'] == ['kms:GenerateDataKey', 'kms:Decrypt']
+        assert statements[2]['Resource'] == {'Fn::GetAtt': ['Key', 'Arn']}
+        assert p['termination_protection']
+        module.exit_json(changed=True)
     if kind == 'ec2_vpc_subnet_info':
         module.exit_json(changed=False, subnets=[dict(subnet_id=s, availability_zone=f'us-east-1{chr(97+i)}',
                                                      vpc_id='vpc-0123456789abcdef0', map_public_ip_on_launch=False)
@@ -48,6 +77,7 @@ def run(kind):
     assert p['metadata_options']['http_tokens'] == 'required'
     assert p['metadata_options']['http_put_response_hop_limit'] == 1
     assert p['termination_protection']
+    assert p['instance_role'] == ('offline-clickhouse-profile' if p['tags']['Role'] == 'clickhouse' else 'offline-test-profile')
     assert len(p['network_interfaces']) == 1
     assert p['network_interfaces'][0]['assign_public_ip'] is False
     assert p['network_interfaces'][0]['groups'] == ['sg-00000000000000001' if p['tags']['Role'] == 'keeper' else 'sg-00000000000000002']

@@ -1,0 +1,109 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Dedicated ClickHouse native backup storage and scoped instance-role policy
+Resources:
+  Key:
+    Type: AWS::KMS::Key
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Description: '{{ stack_name }} backup encryption'
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: {'Fn::Sub': 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'}
+            Action: 'kms:*'
+            Resource: '*'
+  Bucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: '{{ stack_backup_bucket }}'
+      VersioningConfiguration: {Status: Enabled}
+      OwnershipControls:
+        Rules: [{ObjectOwnership: BucketOwnerEnforced}]
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: {'Fn::GetAtt': [Key, Arn]}
+            BucketKeyEnabled: false
+      LifecycleConfiguration:
+        Rules:
+          - Id: AbortIncompleteMultipart
+            Status: Enabled
+            AbortIncompleteMultipartUpload: {DaysAfterInitiation: 7}
+{% if stack_backup_object_lock %}
+      ObjectLockEnabled: true
+      ObjectLockConfiguration:
+        ObjectLockEnabled: Enabled
+        Rule:
+          DefaultRetention:
+            Mode: '{{ stack_backup_object_lock_mode }}'
+            Days: {{ stack_backup_object_lock_days }}
+{% endif %}
+  BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: {Ref: Bucket}
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: TLSOnly
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:*'
+            Resource:
+              - {'Fn::GetAtt': [Bucket, Arn]}
+              - {'Fn::Sub': '${Bucket.Arn}/*'}
+            Condition: {Bool: {'aws:SecureTransport': 'false'}}
+          - Sid: RefuseExplicitNonKMS
+            Effect: Deny
+            Principal: '*'
+            Action: s3:PutObject
+            Resource: {'Fn::Sub': '${Bucket.Arn}/*'}
+            Condition:
+              'Null': {'s3:x-amz-server-side-encryption': 'false'}
+              StringNotEquals: {'s3:x-amz-server-side-encryption': 'aws:kms'}
+          - Sid: RefuseWrongKey
+            Effect: Deny
+            Principal: '*'
+            Action: s3:PutObject
+            Resource: {'Fn::Sub': '${Bucket.Arn}/*'}
+            Condition:
+              'Null': {'s3:x-amz-server-side-encryption-aws-kms-key-id': 'false'}
+              StringNotEquals:
+                's3:x-amz-server-side-encryption-aws-kms-key-id': {'Fn::GetAtt': [Key, Arn]}
+  InstancePolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: '{{ stack_name }}-backup'
+      Roles: ['{{ stack_clickhouse_role_name }}']
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: [s3:ListBucket, s3:ListBucketVersions]
+            Resource: {'Fn::GetAtt': [Bucket, Arn]}
+            Condition: {StringLike: {'s3:prefix': ['{{ stack_backup_prefix }}/*']}}
+          - Effect: Allow
+            Action: [s3:GetObject, s3:GetObjectVersion, s3:PutObject, s3:DeleteObject, s3:DeleteObjectVersion, s3:AbortMultipartUpload]
+            Resource: {'Fn::Sub': '${Bucket.Arn}/{{ stack_backup_prefix }}/*'}
+          - Effect: Allow
+            Action: [kms:GenerateDataKey, kms:Decrypt]
+            Resource: {'Fn::GetAtt': [Key, Arn]}
+            Condition:
+              StringEquals: {'kms:ViaService': {'Fn::Sub': 's3.${AWS::Region}.amazonaws.com'}}
+              StringLike:
+                'kms:EncryptionContext:aws:s3:arn': {'Fn::Sub': '${Bucket.Arn}/{{ stack_backup_prefix }}/*'}
+Outputs:
+  BucketName: {Value: {Ref: Bucket}}
+  KeyArn: {Value: {'Fn::GetAtt': [Key, Arn]}}

@@ -25,6 +25,28 @@
           - stack_subnets.values() | unique | length == 3
           - stack_node_ips.values() | unique | length == stack_nodes | length
 
+    - name: Validate backup resource inputs
+      ansible.builtin.assert:
+        that:
+          - stack_backup_bucket is match('^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$')
+          - stack_backup_bucket != stack_ssm_bucket
+          - stack_backup_prefix is match('^[a-zA-Z0-9_-]+$')
+          - stack_clickhouse_instance_profile | length > 0
+          - stack_clickhouse_instance_profile != stack_instance_profile
+          - stack_clickhouse_role_name | length > 0
+          - not stack_backup_object_lock or stack_backup_object_lock_mode in ['GOVERNANCE', 'COMPLIANCE']
+          - not stack_backup_object_lock or stack_backup_object_lock_days | int > 0
+
+    - name: Provision dedicated backup bucket and customer-managed encryption key
+      amazon.aws.cloudformation:
+        stack_name: '{{ stack_name }}-backups'
+        region: '{{ stack_region }}'
+        state: present
+        capabilities: [CAPABILITY_NAMED_IAM]
+        template_body: >-
+          {{ lookup('ansible.builtin.template', '../templates/backup-resources.yml.j2') | from_yaml | to_json }}
+        termination_protection: true
+
     - name: Inspect operator supplied subnets
       amazon.aws.ec2_vpc_subnet_info:
         region: '{{ stack_region }}'

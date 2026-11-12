@@ -15,3 +15,12 @@ stack_client_security_groups: []
 stack_service_ports:
   keeper: [9281, 9444]
   clickhouse: [8443, 9440, 9010]
+# Backup schedule and retention are configurable owner decisions.
+stack_backup_node: replica1
+stack_backup_database: default
+stack_backup_prefix: clickhouse
+stack_backup_schedule: '*-*-* 02:00:00 UTC'
+stack_backup_full_every_hours: 168
+stack_backup_retention_days: 30
+stack_backup_max_age_hours: 26
+stack_backup_object_lock: false

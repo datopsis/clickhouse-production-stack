@@ -67,6 +67,13 @@ jobs:
           ref: 975d2818ec4f3f295fb5012aeb44cf83cc94a058
           path: .local/image-source
           persist-credentials: false
+      - name: Check out pinned SeaweedFS source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: datopsis/seaweedfs-ubi
+          ref: fd9b0001ee86a432faf773d40ab6f528dbfdad67
+          path: .local/seaweed-source
+          persist-credentials: false
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.13'
@@ -84,3 +91,20 @@ jobs:
       - name: Test TLS topology, replication and failover
         run: |
           sudo env PATH="$PWD/.venv/bin:$PATH" .venv/bin/python tests/functional.py "$(cat "$RUNNER_TEMP/image-id")"
+      - name: Build verified native SeaweedFS stand-in
+        env:
+          NATIVE_ARCH: ${{ matrix.arch }}
+        run: sudo bash scripts/build-seaweedfs.sh .local/seaweed-source "$NATIVE_ARCH"
+      - name: Prove native backup and restore
+        run: |
+          sudo podman image inspect localhost/seaweedfs-stack-ci:build --format '{{.Id}}' > "$RUNNER_TEMP/seaweed-id"
+          sudo env PATH="$PWD/.venv/bin:$PATH" .venv/bin/python tests/backup_functional.py \
+            "$(cat "$RUNNER_TEMP/image-id")" "$(cat "$RUNNER_TEMP/seaweed-id")" "$RUNNER_TEMP/backup-evidence.json"
+      - name: Retain secret-free backup assertions
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: backup-evidence-${{ matrix.arch }}
+          path: ${{ runner.temp }}/backup-evidence.json
+          if-no-files-found: error
+          retention-days: 14

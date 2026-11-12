@@ -21,3 +21,8 @@ stack_image: null
 # Set true ONLY for first creation; reruns default to guarded rolling mode.
 stack_bootstrap: false
 # Supply stack_secrets through --ask-vault-pass -e @vault.yml; see README.
+# Dedicated backup bucket and customer-managed key are provisioned together.
+stack_backup_bucket: null
+# Separate existing ClickHouse SSM profile/role; Keepers retain their SSM-only profile.
+stack_clickhouse_instance_profile: null
+stack_clickhouse_role_name: null

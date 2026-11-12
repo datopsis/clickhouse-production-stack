@@ -19,7 +19,7 @@ class Cluster:
         self.replicas = [n['name'] for n in config['nodes'] if n['role'] == 'clickhouse']
 
     def connect(self, name, port):
-        sock = socket.create_connection((self.config['addresses'][name], port), timeout=10)
+        sock = socket.create_connection((self.config['addresses'][name], port), timeout=self.config.get('query_timeout', 10))
         return self.context.wrap_socket(sock, server_hostname=name)
 
     def query(self, name, sql, reader=False, password=None):

@@ -1,0 +1,56 @@
+---
+- name: Install locked backup SDK requirements
+  ansible.builtin.copy:
+    src: '{{ playbook_dir }}/../../.github/requirements/backup.txt'
+    dest: '{{ stack_root }}/backup-requirements.txt'
+    mode: '0600'
+
+- name: Install existing pinned AWS SDK in the host runtime
+  ansible.builtin.pip:
+    requirements: '{{ stack_root }}/backup-requirements.txt'
+    virtualenv: '{{ stack_root }}/venv'
+    virtualenv_command: python3.11 -m venv
+    extra_args: '--require-hashes --only-binary=:all:'
+
+- name: Install native backup utility
+  ansible.builtin.copy:
+    src: '{{ playbook_dir }}/../../scripts/backup.py'
+    dest: '{{ stack_root }}/backup.py'
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Render backup configuration
+  ansible.builtin.template:
+    src: '{{ playbook_dir | dirname }}/templates/backup.json.j2'
+    dest: '{{ stack_root }}/backup.json'
+    mode: '0600'
+
+- name: Load instance-role credentials before starting ClickHouse
+  ansible.builtin.command:
+    argv: ['{{ stack_root }}/venv/bin/python', '{{ stack_root }}/backup.py', '{{ stack_root }}/backup.json', credentials]
+  changed_when: false
+  no_log: true
+  when: not ansible_check_mode
+
+- name: Install backup services and credential renewal
+  ansible.builtin.template:
+    src: '{{ playbook_dir | dirname }}/templates/{{ item }}.j2'
+    dest: '/etc/systemd/system/{{ item }}'
+    mode: '0644'
+  loop: [clickhouse-backup.service, clickhouse-backup.timer, clickhouse-backup-credentials.service, clickhouse-backup-credentials.timer]
+  register: stack_backup_units
+
+- name: Enable credential renewal on each replica
+  ansible.builtin.systemd_service:
+    name: clickhouse-backup-credentials.timer
+    enabled: true
+    state: started
+    daemon_reload: '{{ stack_backup_units.changed }}'
+
+- name: Enable backup schedule on exactly one designated node
+  ansible.builtin.systemd_service:
+    name: clickhouse-backup.timer
+    enabled: '{{ inventory_hostname == stack_backup_node }}'
+    state: '{{ "started" if inventory_hostname == stack_backup_node else "stopped" }}'
+    daemon_reload: '{{ stack_backup_units.changed }}'

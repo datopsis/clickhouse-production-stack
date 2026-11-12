@@ -4,7 +4,7 @@
       <certificateFile>/etc/stack/tls.crt</certificateFile>
       <privateKeyFile>/etc/stack/tls.key</privateKeyFile>
       <caConfig>/etc/stack/ca.crt</caConfig>
-      <loadDefaultCAFile>false</loadDefaultCAFile>
+      <loadDefaultCAFile>{{ "true" if direction == "client" else "false" }}</loadDefaultCAFile>
       <verificationMode>strict</verificationMode>
 {% if direction == 'client' %}
       <extendedVerification>true</extendedVerification>

@@ -18,3 +18,15 @@
       retries: 12
       delay: 5
       when: not ansible_check_mode
+
+- name: Verify scheduled backup health on its designated node
+  hosts: '{{ stack_backup_node | default("replica1") }}'
+  become: true
+  gather_facts: false
+  vars_files: [../vars/defaults.yml]
+  tasks:
+    - name: Require a successful recent backup
+      ansible.builtin.command:
+        argv: ['{{ stack_root }}/venv/bin/python', '{{ stack_root }}/backup.py', '{{ stack_root }}/backup.json', status]
+      changed_when: false
+      when: not ansible_check_mode

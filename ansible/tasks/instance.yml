@@ -32,7 +32,7 @@
     name: '{{ stack_name }}-{{ node.name }}'
     image_id: '{{ stack_ami_id }}'
     instance_type: '{{ stack_instance_type }}'
-    instance_role: '{{ stack_instance_profile }}'
+    instance_role: '{{ stack_clickhouse_instance_profile if node.role == "clickhouse" else stack_instance_profile }}'
     state: running
     wait: true
     termination_protection: true

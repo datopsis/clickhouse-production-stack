@@ -10,3 +10,6 @@ stack_ssm_kms_key_id: offline-test-kms
 stack_subnets: {a: subnet-00000000000000001, b: subnet-00000000000000002, c: subnet-00000000000000003}
 stack_node_ips: {keeper1: 10.0.1.10, keeper2: 10.0.2.10, keeper3: 10.0.3.10, replica1: 10.0.1.11, replica2: 10.0.2.11}
 stack_https_egress_cidrs: [10.0.4.0/24]
+stack_backup_bucket: offline-test-backups
+stack_clickhouse_instance_profile: offline-clickhouse-profile
+stack_clickhouse_role_name: offline-clickhouse-role

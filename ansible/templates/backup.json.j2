@@ -1,0 +1,14 @@
+{
+  "node": {{ node.name | to_json }},
+  "verification": {{ (stack_root ~ '/verification.json') | to_json }},
+  "credentials_dir": {{ (stack_root ~ '/' ~ node.name ~ '/config/config.d') | to_json }},
+  "status": {{ (stack_root ~ '/backup-status.json') | to_json }},
+  "database": {{ stack_backup_database | to_json }},
+  "bucket": {{ stack_backup_bucket | to_json }},
+  "prefix": {{ stack_backup_prefix | to_json }},
+  "region": {{ stack_region | to_json }},
+  "url": {{ ('https://' ~ stack_backup_bucket ~ '.s3.' ~ stack_region ~ '.amazonaws.com/' ~ stack_backup_prefix) | to_json }},
+  "retention_days": {{ stack_backup_retention_days }},
+  "full_every_hours": {{ stack_backup_full_every_hours }},
+  "max_age_hours": {{ stack_backup_max_age_hours }}
+}

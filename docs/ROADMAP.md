@@ -13,10 +13,15 @@ supported release, AWS rehearsal, FIPS/STIG claim or human sign-off.
    lag/Keeper quorum/disk/TLS expiry alerts, structured log retention and tested
    alert delivery. Define service objectives before alert thresholds. No
    observability service is implemented in the first increment.
-3. **Backup and restore.** Choose storage/IAM/KMS/retention policies, implement
-   consistent backups, restore into an isolated cluster, test point-in-time and
-   disaster recovery, and measure RPO/RTO. Include Keeper metadata and lost-host
-   recovery. No backup implementation is included in the first increment.
+3. **Backup and restore — implementation scope delivered; native evidence required.**
+   Native SQL full/incremental S3 backups, dependency-safe retention, isolated
+   fresh-Keeper DR, renamed table/database recovery, scheduling and status are
+   implemented. See [the runbook](BACKUP-RESTORE.md) and PR's native amd64/arm64
+   evidence before treating this scope as proven. Restore points are backup
+   times only, without replay. Remaining: authorized AWS/KMS/IMDS rehearsal,
+   production RPO/RTO measurement, cross-region copies, Object Lock decision,
+   backup/credential failure alerts, arbitrary Keeper state and lost-host
+   recovery, broader engine/mutation/workload qualification.
 4. **Upgrades and lifecycle.** Version compatibility checks, staged upgrades,
    preflight backup gates, rollback limits, VM/storage replacement, dual-secret
    and CA overlap rotation, maintenance draining and recovery from interrupted

@@ -101,7 +101,7 @@ on a disposable cluster first. The roadmap tracks that work.
 Data and Keeper logs/snapshots are persistent bind mounts on encrypted EBS;
 `/tmp` is disposable. EBS retention and replication are not backup/restore.
 There is no automated volume adoption, host replacement, destructive teardown,
-monitoring, alerting or backup implementation in this increment.
+monitoring or alerting implementation in this increment.
 
 Tests on GitHub are development evidence. The mock AWS modules prove the
 playbook reaches expected parameter contracts with no network or SDK calls;
@@ -124,3 +124,28 @@ rehearsal is required before any operational claim. None has occurred.
 
 `datopsis/container-hardening` is not a CI dependency. No human approval or
 support qualification is asserted by any checked test.
+
+## Backup ownership
+
+Native SQL writes a single configured database to a dedicated private S3 bucket,
+separate from SSM's transfer bucket. Ansible manages the bucket, customer-managed
+rotating KMS key, TLS-only policy, versioning, multipart-abort lifecycle and a
+bucket/prefix-scoped policy on the existing ClickHouse role through a dedicated
+CloudFormation resource stack. The bucket/key are retained on removal. Keepers
+keep a separate SSM-only role. The operator controls IAM profiles, controller
+permissions, KMS administration, private endpoints and disaster recovery access.
+All provisioning is mocked; AWS acceptance remains unverified.
+
+One designated host schedules native full/incremental SQL and retention. Both
+replica hosts renew short-lived IMDSv2 role credentials into a read-only mounted
+named collection, preserving hop limit 1. Only outgoing TLS clients also trust
+the public CA bundle for AWS; inbound cluster mTLS retains the dedicated CA.
+Backup status is a local atomic JSON record consumed by verification. Object
+Lock, schedule, retention, failure-alert delivery and recovery objectives are
+owner decisions. A compromised host/role can delete backups unless a separate
+immutability boundary prevents it.
+
+Fresh-cluster restore rebuilds replicated-table Keeper metadata from SQL; it
+never imports live Keeper snapshots. Only backup-time recovery is implemented,
+with no transaction replay. See [the runbook](BACKUP-RESTORE.md) for scope,
+replication-path requirements and retention coordination during DR.

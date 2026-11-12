@@ -45,5 +45,17 @@
     - name: Configure and deploy node
       ansible.builtin.import_tasks: ../tasks/deploy_node.yml
 
+- name: Establish the initial backup before verification
+  hosts: '{{ stack_backup_node | default("replica1") }}'
+  become: true
+  gather_facts: false
+  vars_files: [../vars/defaults.yml]
+  tasks:
+    - name: Take the first backup during bootstrap
+      ansible.builtin.systemd_service:
+        name: clickhouse-backup.service
+        state: started
+      when: stack_bootstrap
+
 - name: Verify deployed topology
   ansible.builtin.import_playbook: verify.yml

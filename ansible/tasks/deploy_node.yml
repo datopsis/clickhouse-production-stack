@@ -137,6 +137,10 @@
   no_log: true
   diff: false
 
+- name: Configure native backups on ClickHouse hosts
+  ansible.builtin.include_tasks: backup.yml
+  when: node.role == 'clickhouse'
+
 - name: Validate local certificate chain and expiry before restarting
   ansible.builtin.command:
     argv:
