@@ -3,7 +3,7 @@
     <{{ direction }}>
       <certificateFile>/etc/stack/tls.crt</certificateFile>
       <privateKeyFile>/etc/stack/tls.key</privateKeyFile>
-      <caConfig>/etc/stack/ca.crt</caConfig>
+      <caConfig>/etc/stack/{{ "client-ca.crt" if direction == "client" and tls_s3_client | default(false) else "ca.crt" }}</caConfig>
       <loadDefaultCAFile>false</loadDefaultCAFile>
       <verificationMode>strict</verificationMode>
 {% if direction == 'client' %}

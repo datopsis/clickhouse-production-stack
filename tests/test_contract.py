@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import tempfile
 import subprocess
+import ssl
 import unittest
 import xml.etree.ElementTree as ET
 
@@ -41,6 +42,9 @@ class Contract(unittest.TestCase):
         for node in self.variables['stack_nodes']:
             xml = ET.parse(self.path / node['name'] / 'config/config.xml').getroot()
             for direction in ['client', 'server']:
+                self.assertEqual(xml.findtext(f'openSSL/{direction}/loadDefaultCAFile'), 'false')
+                ca = 'client-ca.crt' if direction == 'client' and node['role'] == 'clickhouse' else 'ca.crt'
+                self.assertEqual(xml.findtext(f'openSSL/{direction}/caConfig'), '/etc/stack/' + ca)
                 self.assertEqual(xml.findtext(f'openSSL/{direction}/verificationMode'), 'strict')
                 self.assertEqual(xml.findtext(f'openSSL/{direction}/invalidCertificateHandler/name'), 'RejectCertificateHandler')
             self.assertEqual(xml.findtext('openSSL/client/extendedVerification'), 'true')
@@ -51,10 +55,34 @@ class Contract(unittest.TestCase):
                 self.assertEqual(xml.findtext('keeper_server/raft_configuration/secure'), 'true')
                 self.assertEqual(len(xml.findall('keeper_server/raft_configuration/server')), 3)
             else:
+                self.assertEqual(xml.findtext('distributed_ddl/path'), '/clickhouse/task_queue/ddl')
                 self.assertEqual(len(xml.findall('remote_servers/stack/shard/replica')), 2)
                 self.assertEqual(len(xml.findall('zookeeper/node')), 3)
                 self.assertTrue(all(n.findtext('secure') == '1' for n in xml.findall('zookeeper/node')))
                 self.assertEqual(xml.findtext('interserver_http_credentials/allow_empty'), 'false')
+
+    def test_pinned_scoped_ca_bundle(self):
+        assets = ROOT / 'ansible/files'
+        bundle = (assets / 'amazon-trust-services.pem').read_bytes()
+        manifest = json.loads((assets / 'amazon-trust-services.json').read_text())
+        self.assertEqual(hashlib.sha256(bundle).hexdigest(), manifest['sha256'])
+        certificates = [c + b'-----END CERTIFICATE-----\n' for c in bundle.split(b'-----END CERTIFICATE-----\n')[:-1]]
+        self.assertEqual(len(certificates), 5)
+        for certificate, source in zip(certificates, manifest['roots'], strict=True):
+            self.assertTrue(source['url'].startswith('https://www.amazontrust.com/repository/'))
+            self.assertEqual(hashlib.sha256(certificate).hexdigest(), source['pem_sha256'])
+            self.assertEqual(hashlib.sha256(ssl.PEM_cert_to_DER_cert(certificate.decode())).hexdigest(), source['der_sha256'])
+        private = self.variables['stack_secrets']['ca_cert']
+        for node in self.variables['stack_nodes']:
+            config = self.path / node['name'] / 'config'
+            self.assertEqual((config / 'ca.crt').read_text(), private)
+            expected = private.rstrip() + '\n' + (bundle.decode() if node['role'] == 'clickhouse' else '')
+            self.assertEqual((config / 'client-ca.crt').read_text(), expected)
+            client = ET.parse(config / 'client.xml').getroot()
+            self.assertEqual(client.findtext('openSSL/client/caConfig'), '/etc/stack/ca.crt')
+            self.assertEqual(client.findtext('openSSL/client/loadDefaultCAFile'), 'false')
+            if node['role'] == 'clickhouse':
+                self.assertEqual((config / 's3-ca.crt').read_bytes(), bundle)
 
     def test_no_default_user_or_cleartext_user_password(self):
         xml = ET.parse(self.path / 'replica1/config/users.xml').getroot()
@@ -63,6 +91,8 @@ class Contract(unittest.TestCase):
             self.assertIsNone(xml.find(f'users/{user}/password'))
             self.assertEqual(len(xml.findtext(f'users/{user}/password_sha256_hex')), 64)
         self.assertEqual(xml.findtext('profiles/reader/readonly'), '1')
+        self.assertEqual(xml.findtext('users/stack_admin/named_collection_control'), '1')
+        self.assertIsNone(xml.find('users/stack_reader/named_collection_control'))
 
     def test_input_guards(self):
         base = self.variables | yaml.safe_load((ROOT / 'tests/provision-vars.yml').read_text())

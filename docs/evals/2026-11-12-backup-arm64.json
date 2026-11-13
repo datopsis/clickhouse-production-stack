@@ -1,0 +1,77 @@
+{
+  "assertions": [
+    {
+      "assertion": "buffered HTTP rejects a late SQL execution error",
+      "result": "pass",
+      "error": "replica1: query rejected (HTTP 500, ClickHouse code 395)"
+    },
+    {
+      "assertion": "full backup: exact source count/checksum, one coordinator",
+      "result": "pass",
+      "signature": "100000\t8071977936022618708",
+      "bytes": 6831058,
+      "objects": 14
+    },
+    {
+      "assertion": "incremental: base references and fewer uploaded objects/bytes",
+      "result": "pass",
+      "signature": "101000\t9633416485230737509",
+      "bytes": 77458,
+      "objects": 8,
+      "full_bytes": 6831058
+    },
+    {
+      "assertion": "renamed table restore: exact signature, distinct Keeper path, original unchanged",
+      "result": "pass"
+    },
+    {
+      "assertion": "online snapshot: all pre-start ACKs included; every restored ID ACKed by completion",
+      "result": "pass",
+      "before": 15,
+      "restored": 15,
+      "by_completion": 74
+    },
+    {
+      "assertion": "missing and corrupted backup restores fail with ClickHouse exception codes",
+      "result": "pass",
+      "missing": "replica1: query rejected (HTTP 500, ClickHouse code 599)",
+      "corrupt": "replica1: query rejected (HTTP 500, ClickHouse code 1000)"
+    },
+    {
+      "assertion": "wrong S3 credentials fail; real systemd timer records failure and nonzero exit; verifier refuses",
+      "result": "pass",
+      "error": "replica1: query rejected (HTTP 500, ClickHouse code 499)"
+    },
+    {
+      "assertion": "timer success command records a fresh successful backup",
+      "result": "pass"
+    },
+    {
+      "assertion": "fresh cluster DR and replication: 0",
+      "result": "pass",
+      "signature": "100000\t8071977936022618708",
+      "restore_seconds": 3.682
+    },
+    {
+      "assertion": "fresh cluster DR and replication: 1",
+      "result": "pass",
+      "signature": "101000\t9633416485230737509",
+      "restore_seconds": 3.716
+    },
+    {
+      "assertion": "retention deletes expired full/incremental family and preserves newest family",
+      "result": "pass",
+      "deleted": 3
+    },
+    {
+      "assertion": "fresh cluster DR and replication: 2",
+      "result": "pass",
+      "signature": "101076\t6597183697568225004",
+      "restore_seconds": 3.555
+    }
+  ],
+  "seconds": 304.79781792,
+  "run": "https://github.com/datopsis/clickhouse-production-stack/actions/runs/43216232375",
+  "commit": "e3799e34b17bb3fbb30cb5ce005b562dc58a7db0",
+  "architecture": "arm64"
+}

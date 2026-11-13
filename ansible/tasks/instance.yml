@@ -22,6 +22,8 @@
          stack_existing.instances[0].public_ip_address is not defined and
          stack_existing.instances[0].metadata_options.http_tokens == 'required' and
          stack_existing.instances[0].metadata_options.http_put_response_hop_limit == 1 and
+         stack_existing.instances[0].iam_instance_profile.arn.split('/')[-1] ==
+         (stack_clickhouse_instance_profile if node.role == 'clickhouse' else stack_instance_profile) and
          stack_existing.instances[0].security_groups | map(attribute='group_id') | list ==
          [stack_keeper_sg if node.role == 'keeper' else stack_clickhouse_sg])
     fail_msg: Existing VM differs or is stopped. Investigate explicitly; provisioning does not replace or restart stateful hosts.
@@ -32,7 +34,7 @@
     name: '{{ stack_name }}-{{ node.name }}'
     image_id: '{{ stack_ami_id }}'
     instance_type: '{{ stack_instance_type }}'
-    instance_role: '{{ stack_instance_profile }}'
+    instance_role: '{{ stack_clickhouse_instance_profile if node.role == "clickhouse" else stack_instance_profile }}'
     state: running
     wait: true
     termination_protection: true

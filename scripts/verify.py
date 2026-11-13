@@ -9,6 +9,13 @@ import ssl
 import uuid
 
 
+class QueryError(RuntimeError):
+    """Safe printable message; response body is private diagnostic data."""
+    def __init__(self, message, body):
+        super().__init__(message)
+        self.body = body
+
+
 class Cluster:
     def __init__(self, config):
         self.config = config
@@ -19,7 +26,7 @@ class Cluster:
         self.replicas = [n['name'] for n in config['nodes'] if n['role'] == 'clickhouse']
 
     def connect(self, name, port):
-        sock = socket.create_connection((self.config['addresses'][name], port), timeout=10)
+        sock = socket.create_connection((self.config['addresses'][name], port), timeout=self.config.get('query_timeout', 10))
         return self.context.wrap_socket(sock, server_hostname=name)
 
     def query(self, name, sql, reader=False, password=None):
@@ -29,13 +36,13 @@ class Cluster:
         connection = http.client.HTTPConnection(name, 8443, timeout=30)
         connection.sock = self.connect(name, 8443)
         try:
-            connection.request('POST', '/', body=sql.encode(), headers={'Authorization': f'Basic {auth}'})
+            connection.request('POST', '/?wait_end_of_query=1', body=sql.encode(), headers={'Authorization': f'Basic {auth}'})
             response = connection.getresponse()
             body = response.read().decode()
-            if response.status != 200:
+            if response.status != 200 or response.getheader('X-ClickHouse-Exception-Code') not in (None, '0'):
                 # Never print server exception bodies: they may contain query/secret data.
                 code = response.getheader('X-ClickHouse-Exception-Code', 'unknown')
-                raise RuntimeError(f'{name}: query rejected (HTTP {response.status}, ClickHouse code {code})')
+                raise QueryError(f'{name}: query rejected (HTTP {response.status}, ClickHouse code {code})', body)
             return body.strip()
         finally:
             connection.close()

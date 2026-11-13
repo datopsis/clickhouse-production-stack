@@ -33,11 +33,13 @@
       </shard>
     </stack>
   </remote_servers>
+  <distributed_ddl><path>/clickhouse/task_queue/ddl</path></distributed_ddl>
   <zookeeper>
     <identity>{{ stack_secrets.keeper_identity | e }}</identity>
 {% for peer in stack_nodes if peer.role == 'keeper' %}
     <node><host>{{ peer.name }}</host><port>9281</port><secure>1</secure></node>
 {% endfor %}
   </zookeeper>
+{% set tls_s3_client = true %}
 {% include 'tls.xml.j2' %}
 </clickhouse>

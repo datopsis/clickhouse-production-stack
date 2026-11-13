@@ -1,0 +1,387 @@
+#!/usr/bin/env python3
+"""Native backup evidence: real SQL, real S3 protocol, fresh Keeper for every DR point."""
+import concurrent.futures
+import contextlib
+import json
+import os
+import re
+from pathlib import Path
+import secrets
+import shutil
+from datetime import datetime, timedelta, timezone
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+import xml.etree.ElementTree as ET
+
+import yaml
+from jinja2 import Template
+from fixture import fixture, openssl, ROOT
+from functional import run, retry, must_fail
+sys.path.insert(0, str(ROOT / 'scripts'))
+from backup import Backups, refresh, session, check_status  # noqa: E402
+from verify import Cluster  # noqa: E402
+
+EVIDENCE = []
+
+
+def passed(name, **metrics):
+    record = {'assertion': name, 'result': 'pass', **metrics}
+    EVIDENCE.append(record)
+    print(json.dumps(record), flush=True)
+
+
+@contextlib.contextmanager
+def topology(path, image, s3ca=None):
+    path.mkdir()
+    variables = fixture(path, image)
+    if s3ca:
+        for node in variables['stack_nodes']:
+            if node['role'] != 'clickhouse':
+                continue
+            ca = path / node['name'] / 'config/client-ca.crt'
+            ca.write_text(ca.read_text() + s3ca.read_text())
+    compose_file = path / 'compose.yml'
+    compose = yaml.safe_load(compose_file.read_text())
+    compose['networks'] = {'default': {'external': True, 'name': 'stack-backup-test'}}
+    compose_file.write_text(yaml.safe_dump(compose))
+    command = ['podman-compose', '-f', str(compose_file)]
+    for node in variables['stack_nodes']:
+        assert not any((path / node['name'] / 'data').iterdir()), 'DR data directory is not fresh'
+        run('chown', '-R', '101:0', str(path / node['name']))
+    config = {'nodes': variables['stack_nodes'], 'addresses': variables['stack_node_ips'],
+              'ca': str(path / 'ca.crt'), 'cert': str(path / 'replica1.crt'), 'key': str(path / 'replica1.key'),
+              'admin_password': variables['stack_secrets']['admin_password'],
+              'reader_password': variables['stack_secrets']['reader_password'], 'query_timeout': 600}
+    (path / 'verification.json').write_text(json.dumps(config))
+    cluster = Cluster(config)
+    try:
+        run(*command, 'up', '-d')
+        retry(cluster.quorum)
+        retry(cluster.read_only)
+        assert cluster.query('replica1', 'SELECT version()') == '26.8.2.7'
+        assert cluster.query('replica1', 'SELECT count() FROM system.replicas') == '0'
+        yield cluster
+    except BaseException as error:
+        if hasattr(error, 'body'):
+            # CI-only diagnostics: all credentials are generated hex strings >=32 chars;
+            # also remove long base64/path tokens. Never emit full server logs or SQL bodies.
+            detail = error.body.split('Stack trace:')[0]
+            detail = re.sub(r'[A-Za-z0-9+/=_-]{24,}', '<redacted>', detail)
+            print('Redacted CI exception:', detail[:1500], flush=True)
+        # Server logs can contain rendered SQL. Emit only the secret-free assertion/error code.
+        print('Backup topology failed; SQL exception codes are preserved, credentials/log bodies are not.', flush=True)
+        raise
+    finally:
+        run(*command, 'stop', 'replica1', 'replica2')
+        for node in ['replica1', 'replica2']:
+            state = json.loads(run('podman', 'inspect', 'clickhouse-' + node, capture_output=True).stdout)[0]['State']
+            assert state['ExitCode'] == 0, state['ExitCode']
+        run(*command, 'down', '--volumes')
+
+
+@contextlib.contextmanager
+def seaweed(path, image, ca_path):
+    """Private single-node CI S3 with TLS and freshly generated credentials."""
+    path.mkdir(mode=0o700)
+    credentials = {'aws_access_key_id': secrets.token_hex(16), 'aws_secret_access_key': secrets.token_hex(32)}
+    credentials_path = path / 'credentials.json'
+    credentials_path.write_text(json.dumps(credentials))
+    (path / 's3.json').write_text(json.dumps({'identities': [{'name': 'ci', 'credentials': [
+        {'accessKey': credentials['aws_access_key_id'], 'secretKey': credentials['aws_secret_access_key']}],
+        'actions': ['Admin', 'Read', 'List', 'Write', 'Tagging']}]}))
+    openssl('req', '-newkey', 'rsa:2048', '-nodes', '-subj', '/CN=seaweed', '-keyout', path / 'tls.key', '-out', path / 'tls.csr')
+    (path / 'tls.ext').write_text('subjectAltName=IP:172.30.243.50\nextendedKeyUsage=serverAuth\n')
+    openssl('x509', '-req', '-in', path / 'tls.csr', '-CA', ca_path / 'ca.crt', '-CAkey', ca_path / 'ca.key',
+            '-CAcreateserial', '-days', '1', '-extfile', path / 'tls.ext', '-out', path / 'tls.crt')
+    (path / 'data').mkdir()
+    run('chown', '-R', '1000:0', str(path))
+    names = []
+    try:
+        # Separated roles use the image's qualified s3 TLS flags; every container is hardened.
+        roles = [('master', ['master', '-mdir=/data', '-ip=172.30.243.50', '-volumeSizeLimitMB=32'], '172.30.243.50'),
+                 ('volume', ['volume', '-dir=/data', '-ip=172.30.243.51', '-mserver=172.30.243.50:9333', '-max=5'], '172.30.243.51'),
+                 ('filer', ['filer', '-ip=172.30.243.52', '-master=172.30.243.50:9333', '-defaultStoreDir=/data'], '172.30.243.52'),
+                 ('s3', ['s3', '-filer=172.30.243.52:8888', '-ip.bind=0.0.0.0', '-config=/config/s3.json',
+                         '-cert.file=/config/tls.crt', '-key.file=/config/tls.key'], '172.30.243.53')]
+        # Certificate names the actual gateway IP.
+        (path / 'tls.ext').write_text('subjectAltName=IP:172.30.243.53\nextendedKeyUsage=serverAuth\n')
+        openssl('x509', '-req', '-in', path / 'tls.csr', '-CA', ca_path / 'ca.crt', '-CAkey', ca_path / 'ca.key',
+                '-CAcreateserial', '-days', '1', '-extfile', path / 'tls.ext', '-out', path / 'tls.crt')
+        for name, args, address in roles:
+            data = path / name
+            data.mkdir()
+            run('chown', '1000:0', str(data))
+            container = 'backup-seaweed-' + name
+            names.append(container)
+            run('podman', 'run', '-d', '--name', container, '--network', 'stack-backup-test', '--ip', address,
+                '--user', '1000:0', '--read-only', '--cap-drop=ALL', '--security-opt=no-new-privileges',
+                '--tmpfs', '/tmp:size=64m', '--memory', '512m', '--pids-limit', '128',
+                '-v', f'{data}:/data:Z', '-v', f'{path}:/config:ro,z', image, *args)
+        yield credentials_path
+    finally:
+        for name in reversed(names):
+            run('podman', 'rm', '-f', name)
+
+
+def timer_failure(path, config):
+    """Run the actual rendered production service via a real systemd timer."""
+    shutil.copytree(Path(sys.prefix), path / 'venv', symlinks=True)
+    for name in ['backup.py', 'verify.py']:
+        shutil.copy2(ROOT / 'scripts' / name, path / name)
+    schedule = (datetime.now(timezone.utc) + timedelta(seconds=10)).strftime('%Y-%m-%d %H:%M:%S UTC')
+    units = ['clickhouse-stack.service', 'clickhouse-backup.service', 'clickhouse-backup.timer']
+    try:
+        for unit in units:
+            template = 'stack.service.j2' if unit == 'clickhouse-stack.service' else unit + '.j2'
+            content = Template((ROOT / 'ansible/templates' / template).read_text()).render(
+                stack_root=str(path), stack_backup_schedule=schedule)
+            (Path('/run/systemd/system') / unit).write_text(content)
+        run('systemctl', 'daemon-reload')
+        run('systemctl', 'start', 'clickhouse-stack.service')
+        run('systemctl', 'start', 'clickhouse-backup.timer')
+        def failed():
+            status_path = Path(config['status'])
+            assert status_path.exists(), 'Timer has not run'
+            assert json.loads(status_path.read_text())['state'] == 'failure'
+            result = run('systemctl', 'show', 'clickhouse-backup.service', '--property=Result', '--value', capture_output=True).stdout.strip()
+            assert result == 'exit-code', result
+        retry(failed, seconds=90)
+        code = run('systemctl', 'show', 'clickhouse-backup.service', '--property=ExecMainStatus', '--value', capture_output=True).stdout.strip()
+        assert int(code) != 0
+        assert json.loads(Path(config['status']).read_text())['error_type'] == 'ClientError'
+    except BaseException:
+        journal = run('journalctl', '-u', 'clickhouse-backup.service', '-n', '30', '--no-pager', capture_output=True).stdout
+        print(re.sub(r'[A-Za-z0-9+/=_-]{24,}', '<redacted>', journal), flush=True)
+        raise
+    finally:
+        run('systemctl', 'stop', 'clickhouse-backup.timer')
+        run('systemctl', 'stop', 'clickhouse-backup.service')
+        # Leave Compose running for the remaining assertions; remove its unit after clearing active state.
+        run('systemctl', 'stop', 'clickhouse-stack.service')
+        for unit in units:
+            (Path('/run/systemd/system') / unit).unlink(missing_ok=True)
+        run('systemctl', 'daemon-reload')
+        run('podman-compose', '-f', str(path / 'compose.yml'), 'up', '-d')
+
+
+def configuration(path, credentials, ca):
+    return {'node': 'replica1', 'verification': str(path / 'verification.json'),
+            'credentials_dir': str(path / 'replica1/config/config.d'), 'status': str(path / 'backup-status.json'),
+            'database': 'backup_test', 'region': 'us-east-1', 'bucket': 'backups', 'prefix': 'test',
+            'endpoint': 'https://172.30.243.53:8333', 'url': 'https://172.30.243.53:8333/backups/test',
+            'ca': str(ca), 'test_credentials_file': str(credentials),
+            'full_every_hours': 168, 'retention_days': 30, 'max_age_hours': 26}
+
+
+def authorize(config, cluster, path):
+    for name in cluster.replicas:
+        refresh(config | {'credentials_dir': str(path / name / 'config/config.d')}, session(config))
+        cluster.query(name, 'SYSTEM RELOAD CONFIG')
+
+
+def sql_failure(fn):
+    try:
+        fn()
+    except RuntimeError as error:
+        assert 'query rejected (HTTP' in str(error), str(error)
+        return str(error)
+    raise AssertionError('SQL unexpectedly succeeded')
+
+
+def signature(cluster, table):
+    return cluster.query('replica1', f'SELECT count(), sum(cityHash64(*)) FROM {table}')
+
+
+def objects(manager, backup_id):
+    return [obj for page in manager.s3.get_paginator('list_objects_v2').paginate(
+        Bucket=manager.bucket, Prefix=manager.prefix + 'data/' + backup_id + '/') for obj in page.get('Contents', [])]
+
+
+def main():
+    if os.geteuid() != 0:
+        raise SystemExit('Run using the rootful native test runtime')
+    image, weed_image, evidence_path = sys.argv[1:]
+    start = time.monotonic()
+    with tempfile.TemporaryDirectory(prefix='stack-backup-', dir='/srv') as directory:
+        work = Path(directory)
+        # Independent S3 CA, kept across every fresh cluster incarnation.
+        ca = work / 's3-ca'
+        ca.mkdir()
+        openssl('req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1', '-subj', '/CN=Backup CI S3 CA',
+                '-keyout', ca / 'ca.key', '-out', ca / 'ca.crt')
+        run('podman', 'network', 'create', '--subnet', '172.30.243.0/24', 'stack-backup-test')
+        try:
+            with seaweed(work / 's3', weed_image, ca) as credentials:
+                points = []
+                with topology(work / 'source', image, ca / 'ca.crt') as cluster:
+                    path = work / 'source'
+                    config = configuration(path, credentials, ca / 'ca.crt')
+                    authorize(config, cluster, path)
+                    manager = Backups(config, cluster)
+                    def ready():
+                        try:
+                            manager.s3.list_buckets()
+                        except Exception as error:
+                            raise RuntimeError('S3 not ready') from error
+                    retry(ready)
+                    manager.s3.create_bucket(Bucket='backups')
+                    manager.s3.put_bucket_versioning(Bucket='backups', VersioningConfiguration={'Status': 'Enabled'})
+                    late_error = sql_failure(lambda: cluster.query('replica1',
+                        'SELECT number, throwIf(number=2) FROM numbers(5) SETTINGS max_block_size=1'))
+                    assert 'ClickHouse code 395)' in late_error
+                    passed('buffered HTTP rejects a late SQL execution error', error=late_error)
+                    cluster.query('replica1', 'CREATE DATABASE backup_test ON CLUSTER stack ENGINE=Atomic')
+                    cluster.query('replica1', "CREATE TABLE backup_test.events ON CLUSTER stack (id UInt64, payload String) "
+                                  "ENGINE=ReplicatedMergeTree('/backup-test/{uuid}/{shard}', '{replica}') ORDER BY id")
+                    cluster.query('replica1', 'SYSTEM STOP MERGES ON CLUSTER stack backup_test.events')
+                    # Incompressible deterministic payload: unchanged large parts must be referenced, not copied.
+                    cluster.query('replica1', "INSERT INTO backup_test.events SELECT number, hex(SHA256(toString(number))) FROM numbers(100000)")
+                    full = manager.backup(True)
+                    first = signature(cluster, 'backup_test.events')
+                    assert first == '100000\t8071977936022618708'
+                    full_objects = objects(manager, full['id'])
+                    full_bytes = sum(o['Size'] for o in full_objects)
+                    assert full_bytes > 1000000
+                    assert not any('/replicas/' in o['Key'] for o in full_objects)
+                    passed('full backup: exact source count/checksum, one coordinator', signature=first, bytes=full_bytes, objects=len(full_objects))
+                    points.append((full, first))
+                    cluster.query('replica1', "INSERT INTO backup_test.events SELECT number+100000, hex(SHA256(toString(number+100000))) FROM numbers(1000)")
+                    incremental = manager.backup()
+                    second = signature(cluster, 'backup_test.events')
+                    assert second == '101000\t9633416485230737509'
+                    inc_objects = objects(manager, incremental['id'])
+                    inc_bytes = sum(o['Size'] for o in inc_objects)
+                    manifest_key = manager.prefix + 'data/' + incremental['id'] + '/.backup'
+                    manifest = manager.s3.get_object(Bucket='backups', Key=manifest_key)['Body'].read()
+                    xml = ET.fromstring(manifest)
+                    assert xml.find('base_backup') is not None
+                    assert any(el.text == 'true' or el.text == '1' for el in xml.iter('use_base'))
+                    assert 0 < inc_bytes < full_bytes / 4
+                    # There must be fewer newly uploaded data files than total files described in the manifest.
+                    assert len(inc_objects) < len(list(xml.iter('file')))
+                    passed('incremental: base references and fewer uploaded objects/bytes', signature=second,
+                           bytes=inc_bytes, objects=len(inc_objects), full_bytes=full_bytes)
+                    points.append((incremental, second))
+                    manager.restore(full['id'], 'backup_test.events', 'backup_test.undo', 'TABLE')
+                    cluster.sync('replica2', 'backup_test.undo')
+                    assert signature(cluster, 'backup_test.undo') == first
+                    assert signature(cluster, 'backup_test.events') == second
+                    paths = cluster.query('replica1', "SELECT uniqExact(zookeeper_path) FROM system.replicas WHERE database='backup_test'")
+                    assert paths == '2'
+                    passed('renamed table restore: exact signature, distinct Keeper path, original unchanged')
+                    # Resume normal background work after the deterministic incremental-size measurement.
+                    cluster.query('replica1', 'SYSTEM START MERGES ON CLUSTER stack backup_test.events')
+                    for replica in cluster.replicas:
+                        cluster.sync(replica, 'backup_test.events')
+                    # Single synchronous writer: strict lower/upper acknowledgement bounds, no retries or async inserts.
+                    acknowledged = []
+                    stop = threading.Event()
+                    def writer():
+                        index = 101000
+                        while not stop.is_set():
+                            cluster.query('replica1', f"INSERT INTO backup_test.events VALUES ({index}, 'live')")
+                            acknowledged.append((index, time.time()))
+                            index += 1
+                            stop.wait(0.02)
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                        future = executor.submit(writer)
+                        retry(lambda: acknowledged[0] if acknowledged else (_ for _ in ()).throw(AssertionError('writer not started')))
+                        try:
+                            # A capped full cannot finish in the gap between two writer acknowledgements.
+                            live = manager.backup(True, max_bandwidth=1048576)
+                            lower_time, upper_time = live['started'], live['completed']
+                        finally:
+                            stop.set()
+                        future.result(timeout=60)
+                    lower = {i for i, t in acknowledged if t < lower_time}
+                    upper = {i for i, t in acknowledged if t <= upper_time}
+                    assert upper_time - lower_time >= 2, 'Capped online backup must have a measurable write window'
+                    assert lower and len(upper) > len(lower), 'Backup must overlap acknowledged writes'
+                    manager.restore(live['id'], 'backup_test.events', 'backup_test.live', 'TABLE')
+                    restored = {int(i) for i in cluster.query('replica1', 'SELECT id FROM backup_test.live WHERE id>=101000').splitlines()}
+                    assert lower <= restored <= upper
+                    assert int(cluster.query('replica1', 'SELECT count() FROM backup_test.live WHERE id>=101000')) == len(restored)
+                    assert restored == set(range(101000, max(restored) + 1))
+                    assert cluster.query('replica1', 'SELECT count(), sum(cityHash64(*)) FROM backup_test.live WHERE id<101000') == second
+                    assert cluster.query('replica1', 'SELECT count() FROM backup_test.live WHERE id>=101000 AND payload!=\'live\'') == '0'
+                    passed('online snapshot: all pre-start ACKs included; every restored ID ACKed by completion',
+                           before=len(lower), restored=len(restored), by_completion=len(upper))
+                    missing_error = sql_failure(lambda: manager.restore('0' * 32, 'backup_test.events', 'backup_test.missing', 'TABLE'))
+                    corrupt_id = 'f' * 32
+                    manager.s3.put_object(Bucket='backups', Key=manager.prefix + 'data/' + corrupt_id + '/.backup', Body=b'corrupt')
+                    corrupt_error = sql_failure(lambda: manager.restore(corrupt_id, 'backup_test.events', 'backup_test.corrupt', 'TABLE'))
+                    assert 'ClickHouse code 599)' in missing_error
+                    assert 'ClickHouse code 1000)' in corrupt_error
+                    passed('missing and corrupted backup restores fail with ClickHouse exception codes', missing=missing_error, corrupt=corrupt_error)
+                    # Actual timer ExecStart program, including atomic status, nonzero exit, and verifier rejection.
+                    bad_credentials = work / 'wrong.json'
+                    bad_credentials.write_text(json.dumps({'aws_access_key_id': secrets.token_hex(16), 'aws_secret_access_key': secrets.token_hex(32)}))
+                    bad_config = config | {'test_credentials_file': str(bad_credentials)}
+                    config_path = path / 'backup.json'
+                    config_path.write_text(json.dumps(bad_config))
+                    timer_failure(path, config)
+                    retry(cluster.quorum)
+                    retry(cluster.read_only)
+                    must_fail(lambda: check_status(config['status'], 3600))
+                    # Explicit wrong credential SQL tests ClickHouse's S3 writer, beyond the host SDK failure.
+                    credentials_error = sql_failure(lambda: cluster.query('replica1', "BACKUP TABLE backup_test.events TO S3('https://172.30.243.53:8333/backups/denied/', "
+                                                   + "'" + secrets.token_hex(16) + "', '" + secrets.token_hex(32) + "')"))
+                    assert 'ClickHouse code 499)' in credentials_error
+                    passed('wrong S3 credentials fail; real systemd timer records failure and nonzero exit; verifier refuses', error=credentials_error)
+                    authorize(config, cluster, path)
+                    # New family makes the old family eligible; expire timestamps, not dependency rules.
+                    newest = manager.backup(True)
+                    cluster.query('replica1', "INSERT INTO backup_test.events VALUES (9999999, 'retained')")
+                    newest_inc = manager.backup()
+                    newest_signature = signature(cluster, 'backup_test.events')
+                    points.append((newest_inc, newest_signature))
+                    config_path.write_text(json.dumps(config))
+                    result = subprocess.run([sys.executable, str(ROOT / 'scripts/backup.py'), str(config_path), 'run'], capture_output=True)
+                    assert result.returncode == 0, 'Timer success command failed'
+                    success = check_status(config['status'], 3600)
+                    assert success['backup']['full'] == newest['id']
+                    assert success['backup']['id'] == manager.records()[-1]['id']
+                    points[-1] = (success['backup'], newest_signature)
+                    passed('timer success command records a fresh successful backup')
+                # Source is down. Each DR invocation starts all FIVE nodes on NEW bind directories.
+                for index, (record, expected) in enumerate(points):
+                    with topology(work / f'dr-{index}', image, ca / 'ca.crt') as restored_cluster:
+                        path = work / f'dr-{index}'
+                        cfg = configuration(path, credentials, ca / 'ca.crt')
+                        authorize(cfg, restored_cluster, path)
+                        dr = Backups(cfg, restored_cluster)
+                        if index == 2:
+                            for old in dr.records():
+                                if old['full'] != newest['id']:
+                                    old['completed'] -= 40 * 86400
+                                    dr.s3.put_object(Bucket='backups', Key=dr.prefix + 'catalog/' + old['id'] + '.json',
+                                                     Body=json.dumps(old).encode())
+                            expired = dr.retain()
+                            assert full['id'] in expired and incremental['id'] in expired
+                            assert objects(dr, full['id']) == [] and objects(dr, incremental['id']) == []
+                            for backup_id in expired:
+                                for prefix in [dr.prefix + 'data/' + backup_id + '/', dr.prefix + 'catalog/' + backup_id + '.json']:
+                                    for page in dr.s3.get_paginator('list_object_versions').paginate(Bucket='backups', Prefix=prefix):
+                                        assert not page.get('Versions') and not page.get('DeleteMarkers')
+                            assert {r['full'] for r in dr.records()} == {newest['id']}
+                            passed('retention deletes expired full/incremental family and preserves newest family', deleted=len(expired))
+                        began = time.monotonic()
+                        dr.restore(record['id'], 'backup_test', 'recovered', 'DATABASE')
+                        restored_cluster.sync('replica2', 'recovered.events')
+                        assert signature(restored_cluster, 'recovered.events') == expected
+                        assert restored_cluster.query('replica2', 'SELECT count(), sum(cityHash64(*)) FROM recovered.events') == expected
+                        restored_cluster.query('replica1', "INSERT INTO recovered.events VALUES (88888888, 'post-restore')")
+                        restored_cluster.sync('replica2', 'recovered.events')
+                        assert restored_cluster.query('replica2', 'SELECT count() FROM recovered.events WHERE id=88888888') == '1'
+                        passed('fresh cluster DR and replication: ' + str(index), signature=expected,
+                               restore_seconds=round(time.monotonic() - began, 3))
+        finally:
+            run('podman', 'network', 'rm', 'stack-backup-test')
+            Path(evidence_path).write_text(json.dumps({'assertions': EVIDENCE, 'seconds': time.monotonic() - start}, indent=2) + '\n')
+
+
+if __name__ == '__main__':
+    main()

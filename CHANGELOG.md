@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Narrow outbound CA trust to the private CA plus a verified pinned ATS bundle;
+  keep Keeper/inbound/client trust private and test native/Keeper CA rejection.
+- Document opt-in Object Lock ransomware protection, modes, dependency windows,
+  creation-time settings, expiry failures and separately authorized bypass.
+
+- Add native SQL full/incremental S3 backups, family-safe retention, isolated DR
+  and renamed restore, a single-node systemd schedule and verifiable status.
+- Add mocked dedicated backup bucket/KMS/IAM provisioning and host-side IMDSv2
+  temporary-credential renewal without changing container hardening.
+- Add pinned SeaweedFS build and native amd64/arm64 backup/restore assertions.
+  AWS provisioning remains mocked; no point-in-time replay is implemented.
+
+
 - Enforce LF line endings: `.gitattributes` normalizes text to LF, a local
   pre-commit hook and CI reject any committed CRLF.
 - Add the v1 Ansible/AWS and Podman/Compose deployment with a variable-driven
@@ -13,4 +26,4 @@
 - Add hash-locked tools, pinned collections/actions/image source, lint,
   secret scanning, offline AWS doubles and native Podman topology tests.
 - Document control ownership, first-release limitations and ordered remaining
-  observability, backup/restore, upgrades, multiple-shard and Kubernetes work.
+  observability, upgrades, multiple-shard and Kubernetes work.

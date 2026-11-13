@@ -1,0 +1,35 @@
+---
+- name: Verify the vendored Amazon Trust Services bundle
+  ansible.builtin.assert:
+    that:
+      - >-
+        lookup('file', stack_tls_assets ~ '/amazon-trust-services.pem', rstrip=false) | hash('sha256') ==
+        (lookup('file', stack_tls_assets ~ '/amazon-trust-services.json') | from_json).sha256
+
+- name: Install scoped TLS material
+  ansible.builtin.copy:
+    content: '{{ item.content }}'
+    dest: '{{ stack_root }}/{{ node.name }}/config/{{ item.name }}'
+    owner: '{{ stack_tls_owner | default(omit) }}'
+    group: '{{ stack_tls_group | default(omit) }}'
+    mode: '0400'
+  loop:
+    - {name: ca.crt, content: '{{ stack_secrets.ca_cert }}'}
+    - name: client-ca.crt
+      content: |
+        {{ stack_secrets.ca_cert | trim }}
+        {{ (lookup('file', stack_tls_assets ~ '/amazon-trust-services.pem') if node.role == 'clickhouse' else '') }}
+    - {name: tls.crt, content: '{{ stack_secrets.nodes[node.name].cert }}'}
+    - {name: tls.key, content: '{{ stack_secrets.nodes[node.name].key }}'}
+  register: stack_tls
+  no_log: true
+  diff: false
+
+- name: Install the pinned S3 trust bundle for the host SDK
+  ansible.builtin.copy:
+    src: '{{ stack_tls_assets }}/amazon-trust-services.pem'
+    dest: '{{ stack_root }}/{{ node.name }}/config/s3-ca.crt'
+    owner: '{{ stack_tls_owner | default(omit) }}'
+    group: '{{ stack_tls_group | default(omit) }}'
+    mode: '0400'
+  when: node.role == 'clickhouse'

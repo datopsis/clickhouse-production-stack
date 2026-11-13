@@ -101,7 +101,7 @@ on a disposable cluster first. The roadmap tracks that work.
 Data and Keeper logs/snapshots are persistent bind mounts on encrypted EBS;
 `/tmp` is disposable. EBS retention and replication are not backup/restore.
 There is no automated volume adoption, host replacement, destructive teardown,
-monitoring, alerting or backup implementation in this increment.
+monitoring or alerting implementation in this increment.
 
 Tests on GitHub are development evidence. The mock AWS modules prove the
 playbook reaches expected parameter contracts with no network or SDK calls;
@@ -116,7 +116,7 @@ rehearsal is required before any operational claim. None has occurred.
   agent guidance, roadmap and hardened CI.
 - `datopsis/nginx-ubi` at `aa60c0612e1043f77df7476ce97e30724719e784`:
   agent guidance, roadmap and CI conventions.
-- `datopsis/seaweedfs-ubi` at `1bfd88f26ff63f9b33839ab1d5477e8f7f57376c`:
+- `datopsis/seaweedfs-ubi` at `fd9b0001ee86a432faf773d40ab6f528dbfdad67`:
   agent guidance and CI; its work plan is `docs/README.md` (there is no
   `docs/ROADMAP.md` at that revision).
 - [ClickHouse TLS configuration](https://clickhouse.com/docs/guides/sre/tls/configuring-tls)
@@ -124,3 +124,31 @@ rehearsal is required before any operational claim. None has occurred.
 
 `datopsis/container-hardening` is not a CI dependency. No human approval or
 support qualification is asserted by any checked test.
+
+## Backup ownership
+
+Native SQL writes a single configured database to a dedicated private S3 bucket,
+separate from SSM's transfer bucket. Ansible manages the bucket, customer-managed
+rotating KMS key, TLS-only policy, versioning, multipart-abort lifecycle and a
+bucket/prefix-scoped policy on the existing ClickHouse role through a dedicated
+CloudFormation resource stack. The bucket/key are retained on removal. Keepers
+keep a separate SSM-only role. The operator controls IAM profiles, controller
+permissions, KMS administration, private endpoints and disaster recovery access.
+All provisioning is mocked; AWS acceptance remains unverified.
+
+One designated host schedules native full/incremental SQL and retention. Both
+replica hosts renew short-lived IMDSv2 role credentials into a read-only mounted
+named collection, preserving hop limit 1. Only the ClickHouse server's outgoing TLS context also trusts
+five pinned ATS roots for S3, because 26.8 shares its Poco client context.
+Keeper, standalone clients and inbound mTLS retain private-CA-only trust; no
+context loads the default system CA bundle. The host backup SDK trusts only ATS.
+See [bundle provenance and scope](../ansible/files/README.md).
+Backup status is a local atomic JSON record consumed by verification. Object
+Lock, schedule, retention, failure-alert delivery and recovery objectives are
+owner decisions. A compromised host/role can delete backups unless a separate
+immutability boundary prevents it.
+
+Fresh-cluster restore rebuilds replicated-table Keeper metadata from SQL; it
+never imports live Keeper snapshots. Only backup-time recovery is implemented,
+with no transaction replay. See [the runbook](BACKUP-RESTORE.md) for scope,
+replication-path requirements and retention coordination during DR.

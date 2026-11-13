@@ -7,7 +7,7 @@ or credentials are used in CI.
 
 The variable-driven default is **one shard, two ClickHouse replicas and three
 Keeper nodes**, each on its own private VM. Keepers span three availability
-zones; replicas span at least two. Multiple shards, observability and backups
+zones; replicas span at least two. Multiple shards and observability
 are future work in [the ordered roadmap](docs/ROADMAP.md).
 
 ## Image contract
@@ -51,7 +51,9 @@ required `null`. Defaults live in [defaults.yml](ansible/vars/defaults.yml).
 | `stack_ami_id` | Approved immutable RHEL 9 x86_64 AMI with active SSM agent, Python 3.11 and approved package repositories. |
 | `stack_root_device` | AMI root block device name; default `/dev/sda1`, verify against your AMI. |
 | `stack_instance_type`, `stack_root_volume_gib` | Defaults `m7i.large`, 100 GiB gp3. Workload sizing remains the operator's responsibility. |
-| `stack_instance_profile` | Existing instance profile providing SSM managed-instance access; no application AWS privileges. |
+| `stack_instance_profile` | Existing Keeper instance profile providing SSM managed-instance access only. |
+| `stack_clickhouse_instance_profile`, `stack_clickhouse_role_name` | Separate existing ClickHouse SSM profile/role; receives scoped backup privileges. |
+| `stack_backup_bucket` | Dedicated backup bucket created with a customer-managed KMS key; distinct from the SSM transfer bucket. |
 | `stack_ebs_kms_key_id` | Operator-managed KMS key for encrypted EBS. Root/data volume is retained on termination; termination protection is enabled. |
 | `stack_ssm_bucket`, `stack_ssm_kms_key_id` | Existing private S3 transfer bucket and KMS key for the Ansible SSM connection. |
 | `stack_https_egress_cidrs` | Required private endpoint/proxy/mirror destination CIDRs for HTTPS, including SSM, S3, registry and package access. Catch-all `/0` refused. |
@@ -148,6 +150,26 @@ replacement, automated upgrades and rollback remain separate roadmap work.
 Data lives on the encrypted retained root EBS volume in this increment.
 Retaining a volume is **not a backup**, and a new VM does not automatically
 reattach an old volume.
+
+## Backup and restore
+
+Native ClickHouse SQL backs up one configured database to a dedicated S3 bucket
+from one coordinating replica. Daily incrementals reference a weekly full;
+30-day retention preserves every required base. Ansible manages one systemd
+backup timer and per-replica instance-role credential renewal. No static AWS
+keys are deployed. `verify.yml` rejects failed, missing or stale backup status.
+
+Restore a table or database under a new name, or rebuild an isolated cluster
+with fresh Keeper state. Restore points are backup times only; no replay exists
+between them. Read the [backup and restore runbook](docs/BACKUP-RESTORE.md) for
+commands, UUID-based replication-path requirements, owner choices and limits.
+Provisioning remains mocked; SSE-KMS and real AWS IAM have not been exercised.
+Native CI covers full/incremental backups, fresh-cluster recovery, online
+writes, renamed restore, negative cases and dependency-safe retention against
+TLS-authenticated SeaweedFS on both architectures. ClickHouse outbound TLS uses
+only the private CA plus a [pinned ATS bundle](ansible/files/README.md); inbound
+mTLS and Keeper remain private-CA-only. Object Lock stays off by default; review
+the runbook's Governance recommendation and ransomware/dependency limits.
 
 ## Local and native CI checks
 

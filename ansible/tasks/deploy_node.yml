@@ -95,20 +95,12 @@
   no_log: true
   diff: false
 
-- name: Install operator supplied TLS material
-  ansible.builtin.copy:
-    content: '{{ item.content }}'
-    dest: '{{ stack_root }}/{{ node.name }}/config/{{ item.name }}'
-    owner: '101'
-    group: '0'
-    mode: '0400'
-  loop:
-    - {name: ca.crt, content: '{{ stack_secrets.ca_cert }}'}
-    - {name: tls.crt, content: '{{ stack_secrets.nodes[node.name].cert }}'}
-    - {name: tls.key, content: '{{ stack_secrets.nodes[node.name].key }}'}
-  register: stack_tls
-  no_log: true
-  diff: false
+- name: Install scoped TLS trust and operator certificates
+  ansible.builtin.include_tasks: tls.yml
+  vars:
+    stack_tls_assets: '{{ playbook_dir }}/../files'
+    stack_tls_owner: '101'
+    stack_tls_group: '0'
 
 - name: Render the Compose project
   ansible.builtin.template:
@@ -136,6 +128,10 @@
     mode: '0600'
   no_log: true
   diff: false
+
+- name: Configure native backups on ClickHouse hosts
+  ansible.builtin.include_tasks: backup.yml
+  when: node.role == 'clickhouse'
 
 - name: Validate local certificate chain and expiry before restarting
   ansible.builtin.command:

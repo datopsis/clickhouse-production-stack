@@ -1,0 +1,10 @@
+[Unit]
+Description=ClickHouse backup schedule (designated node only)
+
+[Timer]
+OnCalendar={{ stack_backup_schedule }}
+Persistent=true
+Unit=clickhouse-backup.service
+
+[Install]
+WantedBy=timers.target

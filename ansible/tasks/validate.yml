@@ -22,3 +22,15 @@
       - stack_secrets.nodes[item.name].key | length > 0
   loop: '{{ stack_nodes }}'
   no_log: true
+
+- name: Validate backup scheduling and retention
+  ansible.builtin.assert:
+    that:
+      - stack_backup_node in (stack_nodes | selectattr('role', 'equalto', 'clickhouse') | map(attribute='name') | list)
+      - stack_backup_database is match('^[A-Za-z_][A-Za-z0-9_]*$')
+      - stack_backup_retention_days | int > 0
+      - stack_backup_full_every_hours | int > 0
+      - stack_backup_max_age_hours | int > 0
+      - stack_backup_schedule | length > 0
+      - stack_backup_bucket is match('^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$')
+      - stack_backup_prefix is match('^[a-zA-Z0-9_-]+$')
