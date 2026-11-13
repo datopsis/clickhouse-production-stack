@@ -138,8 +138,11 @@ All provisioning is mocked; AWS acceptance remains unverified.
 
 One designated host schedules native full/incremental SQL and retention. Both
 replica hosts renew short-lived IMDSv2 role credentials into a read-only mounted
-named collection, preserving hop limit 1. Only outgoing TLS clients also trust
-the public CA bundle for AWS; inbound cluster mTLS retains the dedicated CA.
+named collection, preserving hop limit 1. Only the ClickHouse server's outgoing TLS context also trusts
+five pinned ATS roots for S3, because 26.8 shares its Poco client context.
+Keeper, standalone clients and inbound mTLS retain private-CA-only trust; no
+context loads the default system CA bundle. The host backup SDK trusts only ATS.
+See [bundle provenance and scope](../ansible/files/README.md).
 Backup status is a local atomic JSON record consumed by verification. Object
 Lock, schedule, retention, failure-alert delivery and recovery objectives are
 owner decisions. A compromised host/role can delete backups unless a separate

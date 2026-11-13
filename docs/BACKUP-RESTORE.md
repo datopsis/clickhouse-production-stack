@@ -88,13 +88,82 @@ Defaults to review before deployment:
 | `stack_backup_max_age_hours` | `26` | `verify.yml` rejects stale success. |
 | `stack_backup_object_lock` | `false` | Optional owner decision, not enabled implicitly. |
 
-If enabling Object Lock, explicitly supply `stack_backup_object_lock_mode`
-(`GOVERNANCE` or `COMPLIANCE`) and positive `stack_backup_object_lock_days`.
-Understand the irreversible restrictions and charges before applying it.
-The role has **no bypass-retention permission**. Retention encountering a locked
-object fails nonzero and records failure; it does not bypass the lock or erase
-a dependent full. Object Lock is template-tested only, not emulated by CI.
-See [AWS Object Lock](https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-lock.html).
+## Object Lock (ransomware protection)
+
+Object Lock stays **off by default** and is an explicit owner choice. The backup
+role holds `s3:DeleteObjectVersion` so retention can reclaim expired backups.
+Without Object Lock, an attacker controlling a ClickHouse VM can use that role
+to permanently delete backup versions. Versioning and SSE-KMS do not prevent
+this; SSE-KMS provides confidentiality at rest, not immutability.
+
+| Mode | Protection and trade-off |
+| --- | --- |
+| `GOVERNANCE` | Blocks the backup role from deleting protected versions; a separately authorized administrator can override retention. Useful for ransomware resistance with an emergency correction path. Protect that administrator separately from the VMs. |
+| `COMPLIANCE` | Versions cannot be deleted or their retention shortened, even by the account root, until expiry. Stronger protection, but mistakes and storage charges cannot be undone through an administrative bypass. |
+
+**Recommended opt-in: Governance, with a duration at least as long as backup
+retention** (30 days with the current defaults). Native incrementals depend on
+an older full: for protection of the complete dependency chain throughout that
+window, add at least the full interval (30 + 7 = **37 days** here), and account
+for delayed fulls/outages. This implementation does not automatically extend
+an old full's Object Lock date when an incremental references it. The latest
+family can be retained indefinitely by the helper; a finite object lock is not
+indefinite ransomware protection. Monitor successful full creation and rehearse
+recovery from protected versions.
+
+For this stack, enable Object Lock **at bucket creation**, before the first
+backup. Set these exact Ansible variables in the operator's site vars:
+
+```yaml
+stack_backup_object_lock: true
+stack_backup_object_lock_mode: GOVERNANCE
+stack_backup_object_lock_days: 37
+stack_backup_retention_days: 30
+```
+
+Use `COMPLIANCE` only after deciding its irreversible operational constraints.
+There are no separate CloudFormation parameters: Ansible renders
+`Bucket.Properties.ObjectLockEnabled: true`,
+`Bucket.Properties.ObjectLockConfiguration.ObjectLockEnabled: Enabled`, and
+`Bucket.Properties.ObjectLockConfiguration.Rule.DefaultRetention.Mode/Days`
+from the three `stack_backup_object_lock*` variables. Off omits these properties;
+on and off remain covered by mocked provisioning tests. Enabling Object Lock
+cannot later be undone, and versioning cannot be suspended.
+
+AWS now supports enabling Object Lock on existing versioned buckets. That is a
+separate migration, **not tested by this stack**; a newly configured default
+protects new versions, not existing backups retroactively. Existing versions
+need explicit retention. See [AWS configuration instructions](https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-lock-configure.html).
+Do not treat changing the flag after deployment as a verified migration.
+
+The expiry job still selects whole expired families, deletes incrementals
+before their full, and never requests bypass. If an object is still locked,
+S3 refuses deletion: the job exits nonzero, records failure, and leaves the
+catalog/base available for retry after expiry. Earlier deletions may already
+have completed; the operation is not transactional. A lock longer than the
+backup retention window can therefore cause expected cleanup failures until
+expiry. Investigate status failures; do not weaken verification or grant bypass
+to the VM role to make the timer green. The normal dependency retention can
+also keep objects beyond their lock expiry.
+
+A separate administrator needs `s3:BypassGovernanceRetention` **and** permission
+for the intended delete/retention operation, and must explicitly send
+`x-amz-bypass-governance-retention: true` (AWS CLI
+`--bypass-governance-retention`). For example, an authorized administrator can
+use `aws s3api delete-object --bucket BUCKET --key KEY --version-id VERSION
+--bypass-governance-retention`. This permanently deletes that version; preserve
+all retained incremental dependencies before overriding protection. The S3
+console may supply the bypass header automatically for an authorized admin.
+Bypass does not defeat Compliance mode or a legal hold. See
+[AWS retention modes](https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-lock.html)
+and [governance bypass](https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-lock-managing.html).
+
+Object Lock protects versions, not availability of the current key: an attacker
+may add a delete marker or a malicious newer version, requiring administrator
+recovery of known-good versions. It does not protect against stolen read/KMS
+decrypt permissions or KMS key destruction. Keep key and bypass administrators
+outside the VM's trust boundary. Object Lock behavior is template-tested only;
+CI's S3 stand-in does not prove AWS enforcement.
 
 ## Credentials and execution
 
@@ -114,9 +183,23 @@ already-running backup adopts refreshed credentials.
 
 The production template cannot select the helper's test credential-file hook.
 That hook is used only with generated per-run SeaweedFS credentials in CI.
-HTTPS verifies both cluster and S3 identities. Outbound clients load the OS
-public CA bundle for AWS as well as the cluster CA; server-side client mTLS
-continues to trust only the dedicated cluster CA.
+HTTPS verifies both cluster and S3 identities. `loadDefaultCAFile` is false in
+all rendered contexts. The ClickHouse server's outbound `client-ca.crt` combines
+the private cluster CA with only the five pinned Amazon Trust Services roots;
+Keeper, the standalone client and inbound mTLS trust only the private CA.
+The host backup SDK uses only `s3-ca.crt` (the pinned ATS bundle). Bundle SHA-256:
+`dfaa39c0350288ded35812f7b80f76c4a422b97ecc04c4ac84e325bec528b1b8`.
+[Sources, individual fingerprints and update procedure](../ansible/files/README.md)
+are committed alongside the bundle; deployment downloads no roots.
+
+The reviewed 26.8 S3 implementation uses the common Poco HTTPS client pool,
+with no endpoint-specific CA context. Consequently ClickHouse's outbound
+inter-node and Keeper clients also trust the explicit ATS roots. This is not
+private-CA-only outbound isolation; no other public roots are trusted. Native
+CI checks native and Keeper client rejection of a correctly named leaf from a
+second throwaway CA, with successful private-CA TLS handshakes as controls.
+SeaweedFS backup/restore uses an explicit CI-only S3 CA in the outbound bundle;
+it is never added to the inbound cluster trust store.
 
 The host service uses the existing hash-locked boto3 dependency, not a backup
 tool. ClickHouse itself writes and restores all backup data. The SDK only

@@ -20,6 +20,7 @@ supported release, AWS rehearsal, FIPS/STIG claim or human sign-off.
    [measured evidence](evals/2026-11-12-backup-restore.md). Restore points are backup
    times only, without replay. Remaining: authorized AWS/KMS/IMDS rehearsal,
    production RPO/RTO measurement, cross-region copies, Object Lock decision,
+   AWS Object Lock enforcement and existing-bucket migration,
    backup/credential failure alerts, arbitrary Keeper state and lost-host
    recovery, broader engine/mutation/workload qualification.
 4. **Upgrades and lifecycle.** Version compatibility checks, staged upgrades,

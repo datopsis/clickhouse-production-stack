@@ -1,4 +1,5 @@
 {
+  "ca": {{ (stack_root ~ "/" ~ node.name ~ "/config/s3-ca.crt") | to_json }},
   "node": {{ node.name | to_json }},
   "verification": {{ (stack_root ~ '/verification.json') | to_json }},
   "credentials_dir": {{ (stack_root ~ '/' ~ node.name ~ '/config/config.d') | to_json }},

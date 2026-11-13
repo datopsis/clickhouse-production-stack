@@ -18,14 +18,7 @@
   no_log: true
   diff: false
 
-- name: Install ephemeral test TLS inputs
-  ansible.builtin.copy:
-    content: '{{ item.content }}'
-    dest: '{{ stack_root }}/{{ node.name }}/config/{{ item.name }}'
-    mode: '0400'
-  loop:
-    - {name: ca.crt, content: '{{ stack_secrets.ca_cert }}'}
-    - {name: tls.crt, content: '{{ stack_secrets.nodes[node.name].cert }}'}
-    - {name: tls.key, content: '{{ stack_secrets.nodes[node.name].key }}'}
-  no_log: true
-  diff: false
+- name: Install scoped TLS trust with ephemeral test certificates
+  ansible.builtin.include_tasks: ../ansible/tasks/tls.yml
+  vars:
+    stack_tls_assets: '{{ playbook_dir }}/../ansible/files'

@@ -166,7 +166,10 @@ commands, UUID-based replication-path requirements, owner choices and limits.
 Provisioning remains mocked; SSE-KMS and real AWS IAM have not been exercised.
 Native CI covers full/incremental backups, fresh-cluster recovery, online
 writes, renamed restore, negative cases and dependency-safe retention against
-TLS-authenticated SeaweedFS on both architectures.
+TLS-authenticated SeaweedFS on both architectures. ClickHouse outbound TLS uses
+only the private CA plus a [pinned ATS bundle](ansible/files/README.md); inbound
+mTLS and Keeper remain private-CA-only. Object Lock stays off by default; review
+the runbook's Governance recommendation and ransomware/dependency limits.
 
 ## Local and native CI checks
 

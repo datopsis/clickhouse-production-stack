@@ -39,7 +39,9 @@ def topology(path, image, s3ca=None):
     variables = fixture(path, image)
     if s3ca:
         for node in variables['stack_nodes']:
-            ca = path / node['name'] / 'config/ca.crt'
+            if node['role'] != 'clickhouse':
+                continue
+            ca = path / node['name'] / 'config/client-ca.crt'
             ca.write_text(ca.read_text() + s3ca.read_text())
     compose_file = path / 'compose.yml'
     compose = yaml.safe_load(compose_file.read_text())

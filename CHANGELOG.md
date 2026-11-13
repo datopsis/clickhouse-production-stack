@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Narrow outbound CA trust to the private CA plus a verified pinned ATS bundle;
+  keep Keeper/inbound/client trust private and test native/Keeper CA rejection.
+- Document opt-in Object Lock ransomware protection, modes, dependency windows,
+  creation-time settings, expiry failures and separately authorized bypass.
+
 - Add native SQL full/incremental S3 backups, family-safe retention, isolated DR
   and renamed restore, a single-node systemd schedule and verifiable status.
 - Add mocked dedicated backup bucket/KMS/IAM provisioning and host-side IMDSv2

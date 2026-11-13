@@ -11,6 +11,7 @@ import tempfile
 import time
 
 from fixture import fixture, ROOT
+from tls_trust import TLSProbe
 sys.path.insert(0, str(ROOT / 'scripts'))
 from verify import Cluster  # noqa: E402
 
@@ -45,6 +46,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix='stack-functional-') as directory:
         path = Path(directory)
         variables = fixture(path, image)
+        tls_probe = TLSProbe(path)
         nodes = variables['stack_nodes']
         compose = ['podman-compose', '-p', 'stack-test', '-f', str(path / 'compose.yml')]
         for node in nodes:
@@ -90,6 +92,7 @@ def main():
             must_fail(lambda: cluster.query('replica1', 'SELECT 1'))
             cluster.context = original
             print('PASS: hardening, TLS and authentication negative tests', flush=True)
+            tls_probe.check(cluster)
             table = cluster.create_probe()
             try:
                 cluster.query('replica1', f'INSERT INTO {table} VALUES (1)')
@@ -139,7 +142,10 @@ def main():
                     assert state['ExitCode'] == 0, f'{name}: normal shutdown must exit cleanly, got {state["ExitCode"]}'
                 print('PASS: normal database shutdown exits cleanly without SIGKILL', flush=True)
             finally:
-                run(*compose, 'down', '--volumes')
+                try:
+                    run(*compose, 'down', '--volumes')
+                finally:
+                    tls_probe.close()
 
 
 if __name__ == '__main__':

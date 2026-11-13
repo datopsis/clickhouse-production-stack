@@ -1,0 +1,32 @@
+{
+  "source": "https://www.amazontrust.com/repository/",
+  "license": "CC-BY-ND-4.0",
+  "sha256": "dfaa39c0350288ded35812f7b80f76c4a422b97ecc04c4ac84e325bec528b1b8",
+  "roots": [
+    {
+      "url": "https://www.amazontrust.com/repository/AmazonRootCA1.pem",
+      "pem_sha256": "2c43952ee9e000ff2acc4e2ed0897c0a72ad5fa72c3d934e81741cbd54f05bd1",
+      "der_sha256": "8ecde6884f3d87b1125ba31ac3fcb13d7016de7f57cc904fe1cb97c6ae98196e"
+    },
+    {
+      "url": "https://www.amazontrust.com/repository/AmazonRootCA2.pem",
+      "pem_sha256": "a3a7fe25439d9a9b50f60af43684444d798a4c869305bf615881e5c84a44c1a2",
+      "der_sha256": "1ba5b2aa8c65401a82960118f80bec4f62304d83cec4713a19c39c011ea46db4"
+    },
+    {
+      "url": "https://www.amazontrust.com/repository/AmazonRootCA3.pem",
+      "pem_sha256": "3eb7c3258f4af9222033dc1bb3dd2c7cfa0982b98e39fb8e9dc095cfeb38126c",
+      "der_sha256": "18ce6cfe7bf14e60b2e347b8dfe868cb31d02ebb3ada271569f50343b46db3a4"
+    },
+    {
+      "url": "https://www.amazontrust.com/repository/AmazonRootCA4.pem",
+      "pem_sha256": "b0b7961120481e33670315b2f843e643c42f693c7a1010eb9555e06ddc730214",
+      "der_sha256": "e35d28419ed02025cfa69038cd623962458da5c695fbdea3c22b0bfb25897092"
+    },
+    {
+      "url": "https://www.amazontrust.com/repository/SFSRootCAG2.pem",
+      "pem_sha256": "870f56d009d8aeb95b716b0e7b0020225d542c4b283b9ed896edf97428d6712e",
+      "der_sha256": "568d6905a2c88708a4b3025190edcfedb1974a606a13c6e5290fcb2ae63edab5"
+    }
+  ]
+}
